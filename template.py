@@ -37,7 +37,6 @@ def humanbytes(size: int) -> str:
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
     clean_title = file_name.replace("_", " ").replace(".", " ")
-    # Button display text: "1.05 GB • Movie Name..."
     return f"{size_str} • {clean_title}"
 
 def get_search_caption(first_name: str, query: str) -> str:
@@ -48,19 +47,20 @@ def get_search_caption(first_name: str, query: str) -> str:
         "***Your Files is Ready Now***"
     )
 
-def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str) -> InlineKeyboardMarkup:
+def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
     # 1. Header Button showing Title
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # 2. File list buttons
+    # 2. File list buttons as Deep-link URLs (Taaki tap karte hi niche scroll ho)
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
-        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"send_{file_db_id}")])
+        # URL link triggers Telegram auto-scroll
+        buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # 3. Bottom Pagination Buttons (Exact as screenshot)
+    # 3. Bottom Pagination Buttons
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
