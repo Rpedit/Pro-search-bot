@@ -1,4 +1,5 @@
-import aiohttp
+import math
+import secrets
 from pyrogram import Client, filters, idle
 from pyrogram.types import (
     InlineKeyboardMarkup, 
@@ -10,7 +11,7 @@ from pyrogram.types import (
     InlineQuery
 )
 from pyrogram.errors import UserNotParticipant
-from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, SHORTENER_API, SHORTENER_URL
+from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL
 import database as db
 import template as ui
 
@@ -22,17 +23,8 @@ bot = Client(
     in_memory=True
 )
 
-async def get_shortlink(url: str):
-    if not SHORTENER_API or not SHORTENER_URL:
-        return url
-    api_endpoint = f"https://{SHORTENER_URL}/api?api={SHORTENER_API}&url={url}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_endpoint, timeout=8) as res:
-                data = await res.json()
-                return data.get("shortenedUrl", url)
-    except Exception:
-        return url
+# Search Query Cache for Pagination
+SEARCH_CACHE = {}
 
 async def get_fsub_link(client: Client):
     if isinstance(FSUB_CHANNEL, int):
@@ -54,7 +46,7 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- START HANDLER ---
+# --- START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -97,42 +89,10 @@ async def start_handler(client: Client, message: Message):
             caption=caption_text,
             reply_markup=markup
         )
-    except Exception as e:
-        print(f"Photo send failed, sending text fallback: {e}", flush=True)
-        await message.reply_text(
-            text=caption_text,
-            reply_markup=markup
-        )
+    except Exception:
+        await message.reply_text(text=caption_text, reply_markup=markup)
 
-# --- INLINE QUERY HANDLER ---
-@bot.on_inline_query()
-async def inline_query_handler(client: Client, query: InlineQuery):
-    text = query.query.strip()
-    if not text:
-        return await query.answer([], switch_pm_text="Movie ya Series ka naam likhein...", switch_pm_parameter="help")
-
-    files = await db.search_files(text, limit=30)
-    results = []
-
-    for f in files:
-        file_db_id = str(f["_id"])
-        size_str = ui.humanbytes(f["file_size"])
-        btn = [[InlineKeyboardButton("📥 Get File", url=f"https://t.me/{client.me.username}?start=file_{file_db_id}")]]
-        
-        results.append(
-            InlineQueryResultArticle(
-                title=f["file_name"],
-                description=f"Size: {size_str}",
-                input_message_content=InputTextMessageContent(
-                    message_text=f"🎬 **File:** `{f['file_name']}`\n⚡ **Size:** `{size_str}`"
-                ),
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-        )
-
-    await query.answer(results=results, cache_time=5)
-
-# --- AUTO INDEX ---
+# --- AUTO INDEX IN DB CHANNEL ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -147,12 +107,13 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER ---
+# --- SEARCH HANDLER WITH PAGINATION (10 Files Per Page) ---
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
     user_id = message.from_user.id
+    first_name = message.from_user.first_name or "User"
 
     if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
@@ -160,9 +121,9 @@ async def filter_search(client: Client, message: Message):
         return await message.reply_text("⚠️ Pehle hamara update channel join karein.", reply_markup=InlineKeyboardMarkup(btn))
 
     query = message.text.strip()
-    files = await db.search_files(query, limit=10)
+    total_results = await db.count_files(query)
 
-    if not files:
+    if total_results == 0:
         return await message.reply_text(
             f"❌ **No results found for:** `{query}`\n\n"
             "💡 **Tips:**\n"
@@ -170,39 +131,58 @@ async def filter_search(client: Client, message: Message):
             "• Year ya season hata kar search karein"
         )
 
-    buttons = []
-    for f in files:
-        file_db_id = str(f["_id"])
-        formatted_title = ui.format_file_title(f["file_name"])
-        size_str = ui.humanbytes(f["file_size"])
-        btn_text = f"{formatted_title} [{size_str}]"
-        
-        if SHORTENER_API and SHORTENER_URL:
-            deep_link = f"https://t.me/{client.me.username}?start=file_{file_db_id}"
-            short_link = await get_shortlink(deep_link)
-            buttons.append([InlineKeyboardButton(btn_text, url=short_link)])
-        else:
-            buttons.append([InlineKeyboardButton(btn_text, callback_data=f"send_{file_db_id}")])
+    # Generate unique search session id
+    query_id = secrets.token_hex(4)
+    SEARCH_CACHE[query_id] = query
 
-    await message.reply_text(
-        f"🔍 **Found {len(files)} result(s) for:** `{query}`\n👇 *Click button below to download:*",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
+    total_pages = math.ceil(total_results / 10)
+    files = await db.search_files(query, offset=0, limit=10)
 
-# --- SEND FILE CALLBACK ---
-@bot.on_callback_query(filters.regex(r"^send_"))
-async def callback_send_file(client: Client, query: CallbackQuery):
-    db_id = query.data.split("_")[1]
-    file_data = await db.get_file_by_id(db_id)
-    if not file_data:
-        return await query.answer("❌ File database me nahi mili!", show_alert=True)
-        
-    await query.answer("Sending file...")
-    await client.send_cached_media(
-        chat_id=query.from_user.id,
-        file_id=file_data["file_id"],
-        caption=f"🎬 **File:** `{file_data['file_name']}`\n⚡ **Size:** `{ui.humanbytes(file_data['file_size'])}`\n\n🤖 **Bot:** @{client.me.username}"
-    )
+    caption_text = ui.get_search_caption(first_name, query)
+    keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query)
+
+    await message.reply_text(text=caption_text, reply_markup=keyboard)
+
+# --- PAGINATION & SEND CALLBACK ROUTER ---
+@bot.on_callback_query()
+async def callback_router(client: Client, query: CallbackQuery):
+    data = query.data
+    first_name = query.from_user.first_name or "User"
+
+    if data.startswith("send_"):
+        db_id = data.split("_")[1]
+        file_data = await db.get_file_by_id(db_id)
+        if not file_data:
+            return await query.answer("❌ File database me nahi mili!", show_alert=True)
+            
+        await query.answer("Sending file...")
+        await client.send_cached_media(
+            chat_id=query.from_user.id,
+            file_id=file_data["file_id"],
+            caption=f"🎬 **File:** `{file_data['file_name']}`\n⚡ **Size:** `{ui.humanbytes(file_data['file_size'])}`\n\n🤖 **Bot:** @{client.me.username}"
+        )
+
+    elif data.startswith("page_"):
+        _, query_id, page_str = data.split("_")
+        page = int(page_str)
+        search_query = SEARCH_CACHE.get(query_id)
+
+        if not search_query:
+            return await query.answer("⚠️ Session Expired! Please search again.", show_alert=True)
+
+        total_results = await db.count_files(search_query)
+        total_pages = math.ceil(total_results / 10)
+        offset = (page - 1) * 10
+        files = await db.search_files(search_query, offset=offset, limit=10)
+
+        caption_text = ui.get_search_caption(first_name, search_query)
+        keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query)
+
+        await query.message.edit_text(text=caption_text, reply_markup=keyboard)
+        await query.answer()
+
+    elif data in ["pages_click", "header_click"]:
+        await query.answer()
 
 async def main():
     await db.init_db()
