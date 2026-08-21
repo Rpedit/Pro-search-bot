@@ -1,4 +1,5 @@
 import math
+import re
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 START_PIC = "https://graph.org/file/246a70cb4387b59cceb15-9e968f8602a6acb36c.jpg"
@@ -47,17 +48,24 @@ def get_search_caption(first_name: str, query: str) -> str:
         "***Your Files is Ready Now***"
     )
 
+def get_file_caption(raw_file_name: str) -> str:
+    """Exact screenshot matching caption with warning emojis and clean title"""
+    clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
+    return (
+        f"**{clean_name}**\n\n"
+        "⚠️❌👉This file automatically ❗ delete after 1 minute ❗ so please forward in another chat👉❌"
+    )
+
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
     # 1. Header Button showing Title
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # 2. File list buttons as Deep-link URLs (Taaki tap karte hi niche scroll ho)
+    # 2. File list buttons as Deep-link URLs (Instant Scroll down to message)
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
-        # URL link triggers Telegram auto-scroll
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
     # 3. Bottom Pagination Buttons
@@ -66,16 +74,13 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
     else:
-        # Previous button
         if page > 1:
             bottom_row.append(InlineKeyboardButton("⏮ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
             bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         
-        # Center Page counter button
         bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
         
-        # Next button
         if page < total_pages:
             bottom_row.append(InlineKeyboardButton("Next ⏭", callback_data=f"page_{query_id}_{page+1}"))
             
