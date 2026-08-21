@@ -20,18 +20,23 @@ async def save_file(file_id, file_name, file_size, caption=""):
     }
     await files_col.update_one({"file_id": file_id}, {"$set": data}, upsert=True)
 
-async def search_files(query, limit=10):
-    # Words ko split karke flexible regex banayega taaki dots aur space dono match ho
+async def count_files(query: str):
     words = query.strip().split()
     pattern = ".*".join([re.escape(w) for w in words])
     regex = re.compile(pattern, re.IGNORECASE)
-    return await files_col.find({"file_name": regex}).to_list(length=limit)
+    return await files_col.count_documents({"file_name": regex})
 
-async def get_file_by_id(db_id):
+async def search_files(query: str, offset: int = 0, limit: int = 10):
+    words = query.strip().split()
+    pattern = ".*".join([re.escape(w) for w in words])
+    regex = re.compile(pattern, re.IGNORECASE)
+    return await files_col.find({"file_name": regex}).skip(offset).limit(limit).to_list(length=limit)
+
+async def get_file_by_id(db_id: str):
     try:
         return await files_col.find_one({"_id": ObjectId(db_id)})
     except Exception:
         return None
 
-async def add_user(user_id):
+async def add_user(user_id: int):
     await users_col.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
