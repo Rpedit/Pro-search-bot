@@ -26,7 +26,7 @@ bot = Client(
 
 SEARCH_CACHE = {}
 
-# 1-Minute Auto-Delete System
+# 60 Seconds Background Timer for File Auto-Deletion
 async def auto_delete_file(client: Client, chat_id: int, message_id: int, delay: int = 60):
     await asyncio.sleep(delay)
     try:
@@ -77,15 +77,12 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons
             )
 
-    # Deep Link Handler (Jab user movie button par click karega to ye trigger hoga aur auto-scroll karega)
+    # Deep Link Handler (Direct Send with Exact Warning Caption + 1-Min Auto Delete)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
         if file_data:
-            caption_text = (
-                f"**{file_data['file_name']}**\n\n"
-                "⚠️❌**This file automatically delete after 1 minute ⏳ so please forward in another chat**❌⚠️"
-            )
+            caption_text = ui.get_file_caption(file_data["file_name"])
             sent_msg = await client.send_cached_media(
                 chat_id=user_id,
                 file_id=file_data["file_id"],
