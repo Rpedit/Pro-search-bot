@@ -1,12 +1,17 @@
-import asyncio
 import aiohttp
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from pyrogram.errors import UserNotParticipant
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, SHORTENER_API, SHORTENER_URL
 import database as db
 
-bot = Client("AutoFilterBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client(
+    "AutoFilterBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    in_memory=True
+)
 
 async def get_shortlink(url):
     if not SHORTENER_API or not SHORTENER_URL:
@@ -29,6 +34,15 @@ def humanbytes(size):
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
+async def get_fsub_link(client: Client):
+    if isinstance(FSUB_CHANNEL, int):
+        try:
+            chat = await client.get_chat(FSUB_CHANNEL)
+            return chat.invite_link or f"https://t.me/{chat.username}"
+        except Exception:
+            return "https://t.me"
+    return f"https://t.me/{FSUB_CHANNEL}"
+
 async def is_subscribed(client: Client, user_id: int):
     if not FSUB_CHANNEL:
         return True
@@ -45,18 +59,17 @@ async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id
     await db.add_user(user_id)
 
-    # Force Subscribe Check
     if not await is_subscribed(client, user_id):
+        invite_link = await get_fsub_link(client)
         btn = [
-            [InlineKeyboardButton("📢 Join Update Channel", url=f"https://t.me/{FSUB_CHANNEL}")],
+            [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
             [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{client.me.username}?start=start")]
         ]
         return await message.reply_text(
-            "⚠️ **Aapko files lene ke liye pehle hamara update channel join karna hoga!**",
+            "⚠️ **Aapko files lene ke liye pehle hamara channel join karna hoga!**",
             reply_markup=InlineKeyboardMarkup(btn)
         )
 
-    # Deep Link Check (Jab user short link ya button click karke aaye)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         file_id = message.command[1].replace("file_", "")
         return await client.send_cached_media(chat_id=user_id, file_id=file_id)
@@ -66,7 +79,6 @@ async def start_handler(client: Client, message: Message):
         "Mujhe kisi bhi Movie ya Series ka naam bhejo, main aapko file provide kar dunga."
     )
 
-# Database Channel me aayi files ko auto index karna
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -80,20 +92,20 @@ async def auto_index(client: Client, message: Message):
         caption=message.caption or ""
     )
 
-# Search Handler
 @bot.on_message(filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     user_id = message.from_user.id
 
     if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
-        btn = [[InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{FSUB_CHANNEL}")]]
+        invite_link = await get_fsub_link(client)
+        btn = [[InlineKeyboardButton("📢 Join Channel", url=invite_link)]]
         return await message.reply_text("⚠️ Pehle channel join karein files access karne ke liye.", reply_markup=InlineKeyboardMarkup(btn))
 
     query = message.text.strip()
     files = await db.search_files(query, limit=10)
 
     if not files:
-        return await message.reply_text("❌ **Koi result nahi mila!**\nSpelling check karein ya season/year hata kar search karein.")
+        return await message.reply_text("❌ **Koi result nahi mila!**\nSpelling check karein.")
 
     buttons = []
     for f in files:
@@ -111,7 +123,6 @@ async def filter_search(client: Client, message: Message):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# Direct File Callback
 @bot.on_callback_query(filters.regex(r"^send_"))
 async def callback_send_file(client: Client, query: CallbackQuery):
     file_id = query.data.split("_")[1]
@@ -121,9 +132,9 @@ async def callback_send_file(client: Client, query: CallbackQuery):
 async def main():
     await db.init_db()
     await bot.start()
-    print("Bot Successfully Started!")
-    # Keep bot running
-    await asyncio.Event().wait()
+    print(">>> BOT IS ONLINE AND LISTENING <<<", flush=True)
+    await idle()
+    await bot.stop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    bot.run(main())
