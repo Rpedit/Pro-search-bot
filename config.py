@@ -6,7 +6,7 @@ load_dotenv()
 API_ID = int(os.getenv("API_ID", "25135658"))
 API_HASH = os.getenv("API_HASH", "8bc184fb03aecc4c50f47c7f5aef3177")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-MONGO_URI = os.getenv("MONGO_URI", "")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://rpeditz:rpeditz@rpeditz.tzgtpiq.mongodb.net/?retryWrites=true&w=majority&appName=rpeditz")
 
 # Channels & Admins
 DB_CHANNEL = int(os.getenv("DB_CHANNEL", "-1003968479864"))
