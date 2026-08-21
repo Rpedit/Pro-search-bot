@@ -57,13 +57,11 @@ async def is_subscribed(client: Client, user_id: int):
 # --- START HANDLER ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
-    if not message.from_user:
-        return
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name or "User"
+    user_id = message.from_user.id if message.from_user else message.chat.id
+    first_name = message.from_user.first_name if message.from_user else "User"
     await db.add_user(user_id)
 
-    # Force-Subscribe check
+    # Force Subscribe Check
     if not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         buttons = ui.get_fsub_buttons(invite_link, client.me.username)
@@ -90,7 +88,6 @@ async def start_handler(client: Client, message: Message):
                 caption=f"🎬 **File:** `{file_data['file_name']}`\n⚡ **Size:** `{ui.humanbytes(file_data['file_size'])}`\n\n🤖 **Bot:** @{client.me.username}"
             )
 
-    # Clean Start UI with Fallback
     caption_text = ui.get_start_text(first_name)
     markup = ui.get_start_buttons(client.me.username)
 
@@ -100,28 +97,26 @@ async def start_handler(client: Client, message: Message):
             caption=caption_text,
             reply_markup=markup
         )
-    except Exception:
-        # Agar photo fetch me error aaye toh direct text bhej dega
+    except Exception as e:
+        print(f"Photo send failed, sending text fallback: {e}", flush=True)
         await message.reply_text(
             text=caption_text,
             reply_markup=markup
         )
 
-# --- INLINE SEARCH HANDLER ---
+# --- INLINE QUERY HANDLER ---
 @bot.on_inline_query()
 async def inline_query_handler(client: Client, query: InlineQuery):
     text = query.query.strip()
     if not text:
-        return await query.answer([], switch_pm_text="Search movie or series...", switch_pm_parameter="help")
+        return await query.answer([], switch_pm_text="Movie ya Series ka naam likhein...", switch_pm_parameter="help")
 
     files = await db.search_files(text, limit=30)
     results = []
 
     for f in files:
         file_db_id = str(f["_id"])
-        formatted_title = ui.format_file_title(f["file_name"])
         size_str = ui.humanbytes(f["file_size"])
-        
         btn = [[InlineKeyboardButton("📥 Get File", url=f"https://t.me/{client.me.username}?start=file_{file_db_id}")]]
         
         results.append(
@@ -137,7 +132,7 @@ async def inline_query_handler(client: Client, query: InlineQuery):
 
     await query.answer(results=results, cache_time=5)
 
-# --- AUTO INDEX IN DB CHANNEL ---
+# --- AUTO INDEX ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
