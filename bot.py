@@ -72,9 +72,12 @@ async def start_handler(client: Client, message: Message):
             reply_markup=InlineKeyboardMarkup(btn)
         )
 
+    # Deep Link Check (start=file_DBID)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
-        file_id = message.command[1].replace("file_", "")
-        return await client.send_cached_media(chat_id=user_id, file_id=file_id)
+        db_id = message.command[1].replace("file_", "")
+        file_data = await db.get_file_by_id(db_id)
+        if file_data:
+            return await client.send_cached_media(chat_id=user_id, file_id=file_data["file_id"])
 
     await message.reply_text(
         f"👋 **Namaste {message.from_user.mention}!**\n\n"
@@ -96,7 +99,7 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# Search Handler (Sirf Users aur Groups ke liye)
+# Search Handler
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -116,14 +119,17 @@ async def filter_search(client: Client, message: Message):
 
     buttons = []
     for f in files:
+        file_db_id = str(f["_id"])
         btn_text = f"🎬 {f['file_name'][:28]}... [{humanbytes(f['file_size'])}]"
+        
         if SHORTENER_API and SHORTENER_URL:
             bot_username = client.me.username
-            deep_link = f"https://t.me/{bot_username}?start=file_{f['file_id']}"
+            deep_link = f"https://t.me/{bot_username}?start=file_{file_db_id}"
             short_link = await get_shortlink(deep_link)
             buttons.append([InlineKeyboardButton(btn_text, url=short_link)])
         else:
-            buttons.append([InlineKeyboardButton(btn_text, callback_data=f"send_{f['file_id']}")])
+            # Short callback data (< 64 bytes)
+            buttons.append([InlineKeyboardButton(btn_text, callback_data=f"send_{file_db_id}")])
 
     await message.reply_text(
         f"🔍 **Found {len(files)} result(s) for:** `{query}`",
@@ -133,9 +139,13 @@ async def filter_search(client: Client, message: Message):
 # Direct File Callback
 @bot.on_callback_query(filters.regex(r"^send_"))
 async def callback_send_file(client: Client, query: CallbackQuery):
-    file_id = query.data.split("_")[1]
+    db_id = query.data.split("_")[1]
+    file_data = await db.get_file_by_id(db_id)
+    if not file_data:
+        return await query.answer("❌ File nahi mili!", show_alert=True)
+        
     await query.answer("File bhej raha hu...")
-    await client.send_cached_media(chat_id=query.from_user.id, file_id=file_id)
+    await client.send_cached_media(chat_id=query.from_user.id, file_id=file_data["file_id"])
 
 async def main():
     await db.init_db()
