@@ -10,8 +10,8 @@ MONGO_URI = os.getenv("MONGO_URI", "")
 
 # Channels & Admins
 DB_CHANNEL = int(os.getenv("DB_CHANNEL", "-1003968479864"))
-FSUB_CHANNEL = os.getenv("FSUB_CHANNEL", "-1002855667443").replace("@", "").strip()
-ADMINS_RAW = os.getenv("ADMINS", "")
+FSUB_CHANNEL = os.getenv("FSUB_CHANNEL", "-1002855667443").replace("@", "https://t.me/HDProSearch").strip()
+ADMINS_RAW = os.getenv("ADMINS", "7067885693")
 ADMINS = [int(x) for x in ADMINS_RAW.split() if x.strip().lstrip("-").isdigit()]
 
 # Shortener Settings (Optional)
