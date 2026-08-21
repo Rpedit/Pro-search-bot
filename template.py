@@ -7,13 +7,11 @@ def get_start_text(first_name: str) -> str:
     return (
         f"Hey 👋 **{first_name}**🤩\n\n"
         "🍿 **WELCOME TO THE WORLD'S COOLEST SEARCH ENGINE!**\n\n"
-        "Here You Can Request Movie's, Just Sent Movie OR WebSeries Name With Proper Google Spelling..!!"
+        "Here You Can Request Movie's, Just Sent Movie OR WebSeries Name With Proper **Google** Spelling..!!"
     )
 
 def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
-    share_text = f"Hey! Check out this awesome Movie & Series Search Bot: @{bot_username}"
-    share_url = f"https://t.me/share/url?url={share_text}"
-    
+    share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
     buttons = [
         [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("📩 SHARE Now 📩", url=share_url)]
