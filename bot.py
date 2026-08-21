@@ -11,7 +11,7 @@ from pyrogram.types import (
     CallbackQuery, 
     InlineQuery
 )
-from pyrogram.errors import UserNotParticipant
+from pyrogram.errors import UserNotParticipant, MessageNotModified
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL
 import database as db
 import template as ui
@@ -26,7 +26,6 @@ bot = Client(
 
 SEARCH_CACHE = {}
 
-# 60 Seconds Background Timer for File Auto-Deletion
 async def auto_delete_file(client: Client, chat_id: int, message_id: int, delay: int = 60):
     await asyncio.sleep(delay)
     try:
@@ -61,7 +60,6 @@ async def start_handler(client: Client, message: Message):
     first_name = message.from_user.first_name if message.from_user else "User"
     await db.add_user(user_id)
 
-    # Force Subscribe Check
     if not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         buttons = ui.get_fsub_buttons(invite_link, client.me.username)
@@ -77,7 +75,7 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons
             )
 
-    # Deep Link Handler (Direct Send with Exact Warning Caption + 1-Min Auto Delete)
+    # Deep Link Handler
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -153,30 +151,36 @@ async def filter_search(client: Client, message: Message):
 
     await message.reply_text(text=caption_text, reply_markup=keyboard)
 
-# --- PAGINATION CALLBACK ROUTER ---
+# --- CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
     if data.startswith("page_"):
-        _, query_id, page_str = data.split("_")
-        page = int(page_str)
-        search_query = SEARCH_CACHE.get(query_id)
+        try:
+            _, query_id, page_str = data.split("_")
+            page = int(page_str)
+            search_query = SEARCH_CACHE.get(query_id)
 
-        if not search_query:
-            return await query.answer("⚠️ Session Expired! Please search again.", show_alert=True)
+            if not search_query:
+                return await query.answer("⚠️ Session Expired! Please search again.", show_alert=True)
 
-        total_results = await db.count_files(search_query)
-        total_pages = math.ceil(total_results / 10)
-        offset = (page - 1) * 10
-        files = await db.search_files(search_query, offset=offset, limit=10)
+            total_results = await db.count_files(search_query)
+            total_pages = math.ceil(total_results / 10)
+            offset = (page - 1) * 10
+            files = await db.search_files(search_query, offset=offset, limit=10)
 
-        caption_text = ui.get_search_caption(first_name, search_query)
-        keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query, client.me.username)
+            caption_text = ui.get_search_caption(first_name, search_query)
+            keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query, client.me.username)
 
-        await query.message.edit_text(text=caption_text, reply_markup=keyboard)
-        await query.answer()
+            await query.message.edit_text(text=caption_text, reply_markup=keyboard)
+        except MessageNotModified:
+            pass
+        except Exception as e:
+            print(f"Pagination Error: {e}", flush=True)
+        finally:
+            await query.answer()
 
     elif data in ["pages_click", "header_click"]:
         await query.answer()
