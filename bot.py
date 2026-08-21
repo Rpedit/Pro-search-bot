@@ -56,6 +56,8 @@ async def is_subscribed(client: Client, user_id: int):
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
+    if not message.from_user:
+        return
     user_id = message.from_user.id
     await db.add_user(user_id)
 
@@ -79,6 +81,7 @@ async def start_handler(client: Client, message: Message):
         "Mujhe kisi bhi Movie ya Series ka naam bhejo, main aapko file provide kar dunga."
     )
 
+# Database Channel me aayi files ko auto index karna
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -91,9 +94,13 @@ async def auto_index(client: Client, message: Message):
         file_size=media.file_size,
         caption=message.caption or ""
     )
+    print(f"[INDEXED]: {file_name}", flush=True)
 
-@bot.on_message(filters.text & ~filters.command(["start", "help"]))
+# Search Handler (Sirf Users aur Groups ke liye)
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
+    if not message.from_user:
+        return
     user_id = message.from_user.id
 
     if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
@@ -105,7 +112,7 @@ async def filter_search(client: Client, message: Message):
     files = await db.search_files(query, limit=10)
 
     if not files:
-        return await message.reply_text("❌ **Koi result nahi mila!**\nSpelling check karein.")
+        return await message.reply_text("❌ **Koi result nahi mila!**\nSpelling check karein ya season/year hata kar search karein.")
 
     buttons = []
     for f in files:
@@ -123,6 +130,7 @@ async def filter_search(client: Client, message: Message):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
+# Direct File Callback
 @bot.on_callback_query(filters.regex(r"^send_"))
 async def callback_send_file(client: Client, query: CallbackQuery):
     file_id = query.data.split("_")[1]
