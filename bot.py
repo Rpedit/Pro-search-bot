@@ -1,5 +1,6 @@
 import math
 import secrets
+import asyncio
 from pyrogram import Client, filters, idle
 from pyrogram.types import (
     InlineKeyboardMarkup, 
@@ -23,8 +24,15 @@ bot = Client(
     in_memory=True
 )
 
-# Search Query Cache for Pagination
 SEARCH_CACHE = {}
+
+# 1-Minute Auto-Delete System
+async def auto_delete_file(client: Client, chat_id: int, message_id: int, delay: int = 60):
+    await asyncio.sleep(delay)
+    try:
+        await client.delete_messages(chat_id=chat_id, message_ids=message_id)
+    except Exception:
+        pass
 
 async def get_fsub_link(client: Client):
     if isinstance(FSUB_CHANNEL, int):
@@ -69,16 +77,22 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons
             )
 
-    # Deep Link Handler
+    # Deep Link Handler (Jab user movie button par click karega to ye trigger hoga aur auto-scroll karega)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
         if file_data:
-            return await client.send_cached_media(
+            caption_text = (
+                f"**{file_data['file_name']}**\n\n"
+                "⚠️❌**This file automatically delete after 1 minute ⏳ so please forward in another chat**❌⚠️"
+            )
+            sent_msg = await client.send_cached_media(
                 chat_id=user_id,
                 file_id=file_data["file_id"],
-                caption=f"🎬 **File:** `{file_data['file_name']}`\n⚡ **Size:** `{ui.humanbytes(file_data['file_size'])}`\n\n🤖 **Bot:** @{client.me.username}"
+                caption=caption_text
             )
+            asyncio.create_task(auto_delete_file(client, user_id, sent_msg.id, delay=60))
+            return
 
     caption_text = ui.get_start_text(first_name)
     markup = ui.get_start_buttons(client.me.username)
@@ -107,7 +121,7 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER WITH PAGINATION (10 Files Per Page) ---
+# --- SEARCH HANDLER ---
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -131,7 +145,6 @@ async def filter_search(client: Client, message: Message):
             "• Year ya season hata kar search karein"
         )
 
-    # Generate unique search session id
     query_id = secrets.token_hex(4)
     SEARCH_CACHE[query_id] = query
 
@@ -139,30 +152,17 @@ async def filter_search(client: Client, message: Message):
     files = await db.search_files(query, offset=0, limit=10)
 
     caption_text = ui.get_search_caption(first_name, query)
-    keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query)
+    keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
     await message.reply_text(text=caption_text, reply_markup=keyboard)
 
-# --- PAGINATION & SEND CALLBACK ROUTER ---
+# --- PAGINATION CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    if data.startswith("send_"):
-        db_id = data.split("_")[1]
-        file_data = await db.get_file_by_id(db_id)
-        if not file_data:
-            return await query.answer("❌ File database me nahi mili!", show_alert=True)
-            
-        await query.answer("Sending file...")
-        await client.send_cached_media(
-            chat_id=query.from_user.id,
-            file_id=file_data["file_id"],
-            caption=f"🎬 **File:** `{file_data['file_name']}`\n⚡ **Size:** `{ui.humanbytes(file_data['file_size'])}`\n\n🤖 **Bot:** @{client.me.username}"
-        )
-
-    elif data.startswith("page_"):
+    if data.startswith("page_"):
         _, query_id, page_str = data.split("_")
         page = int(page_str)
         search_query = SEARCH_CACHE.get(query_id)
@@ -176,7 +176,7 @@ async def callback_router(client: Client, query: CallbackQuery):
         files = await db.search_files(search_query, offset=offset, limit=10)
 
         caption_text = ui.get_search_caption(first_name, search_query)
-        keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query)
+        keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query, client.me.username)
 
         await query.message.edit_text(text=caption_text, reply_markup=keyboard)
         await query.answer()
