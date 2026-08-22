@@ -103,24 +103,31 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Exact Button Format: 903.56 MB • Mad Concrete Dreams S01E12 108...
+# Proper Title Case formatting (e.g. 1.13 GB • Mad Concrete Dreams S01E01 1080p)
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
     clean_title = file_name.replace("_", " ").replace(".", " ")
+    
+    # Title Case conversion (words ko capital banata hai)
+    clean_title = " ".join([w.capitalize() if not re.match(r"^(1080p|720p|480p|2160p|4k|mkv|mp4|esub|hin|kor|eng|dual)$", w, re.I) else w.upper() for w in clean_title.split()])
+    
+    # Season & Episode formatting (e.g. S01e01 -> S01E01)
+    clean_title = re.sub(r'(?i)\b(s\d{1,2})(e\d{1,2})\b', lambda m: f"{m.group(1).upper()}{m.group(2).upper()}", clean_title)
+    
     return f"{size_str} • {clean_title}"
 
-# Exact Caption Format matching Screenshot 1 & 2
+# Exact Caption Format matching Screenshot 2
 def get_search_caption(first_name: str, user_id: int, query: str) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
         f"Hey __{user_mention}__ 👋🏻\n\n"
         "⭕️Rotate your 🔄 phone to see files'\n"
         "full name...........................................⭕️\n\n"
-        f"***Title : {query}***\n"
+        f"***Title : {query.title()}***\n"
         "***Your Files is Ready Now***"
     )
 
-# Exact File Caption matching 1 minute warning
+# File Caption matching 1 minute warning
 def get_file_caption(raw_file_name: str) -> str:
     clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
     return (
@@ -130,14 +137,15 @@ def get_file_caption(raw_file_name: str) -> str:
         "**forward in another chat👉❌**"
     )
 
-# Auto delete alert text
+# Auto delete alert text matching Screenshot 2 top alert
 def get_deleted_alert_text(first_name: str, user_id: int) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
-        f"Hey {user_mention},\n\n"
+        f"Hey __{user_mention}__ ,\n\n"
         "**Your Request Has Been Deleted👍🏻**\n"
         "*(Due To Avoid Copyrights Issue😌)*\n\n"
-        "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
+        "**If You Want That File, REQUEST AGAIN**\n"
+        "❤️"
     )
 
 
@@ -146,34 +154,32 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Header Button: 🎬 Mad Concrete Dreams 🎬
-    buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
+    # Header Button: 🎬 Title in Title Case 🎬
+    formatted_header = query_title.title()[:28]
+    buttons.append([InlineKeyboardButton(f"🎬 {formatted_header} 🎬", callback_data="header_click")])
     
-    # Matching File Buttons
+    # Matching File Buttons (Deep Link)
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Bottom Navigation Row matching Screenshot 1 & 2
+    # Bottom Navigation Row matching Screenshot 2
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
     else:
-        # Page 1 par "■ Pages", Page 2+ par exact "⏪ Previous"
         if page > 1:
             bottom_row.append(InlineKeyboardButton("⏪ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
             bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         
-        # Middle Page Counter: Page 1 par "1/2", Page 2 par "2 / 2"
         if page == 1:
             bottom_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="pages_click"))
         else:
             bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
         
-        # Next Button (Only on Page 1 / Before last page): "Next ⏩"
         if page < total_pages:
             bottom_row.append(InlineKeyboardButton("Next ⏩", callback_data=f"page_{query_id}_{page+1}"))
             
