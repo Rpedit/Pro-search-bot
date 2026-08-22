@@ -19,7 +19,7 @@ from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
-from broadcast import handle_broadcast
+from broadcast import handle_broadcast, handle_broadcast_callback
 
 bot = Client(
     "AutoFilterBot",
@@ -323,7 +323,12 @@ async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    if data == "btn_search_guide":
+    # Broadcast confirmation aur mode selection callback
+    if data.startswith("bcast_"):
+        await handle_broadcast_callback(client, query)
+        return
+
+    elif data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
         guide_msg = await query.message.reply_text(text=guide_text)
