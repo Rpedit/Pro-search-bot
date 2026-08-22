@@ -81,7 +81,7 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
     # 1. Header Button showing Title
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # 2. File list buttons as Deep-link URLs (Instant Scroll down to message)
+    # 2. File list buttons as Deep-link URLs
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
