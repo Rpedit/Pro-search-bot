@@ -1,109 +1,145 @@
-import re
-from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorClient
-from config import DATABASE_URI_1, DATABASE_URI_2, USE_SECOND_DB
+import libsql_client
+from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
 
-# --- DB 1 (PRIMARY) ---
-client1 = AsyncIOMotorClient(DATABASE_URI_1)
-db1 = client1["TelegramAutoFilterBot"]
-files_col1 = db1["files"]
-users_col = db1["users"]  # Users & Ban list Primary DB me rahegi
+client = libsql_client.create_client_async(
+    url=TURSO_DB_URL,
+    auth_token=TURSO_AUTH_TOKEN
+)
 
-# --- DB 2 (SECONDARY / BACKUP) ---
-client2 = AsyncIOMotorClient(DATABASE_URI_2) if DATABASE_URI_2 else None
-db2 = client2["TelegramAutoFilterBot2"] if client2 else None
-files_col2 = db2["files"] if db2 else None
-
+# --- INITIALIZE TABLES & INDEXES ---
 async def init_db():
-    await files_col1.create_index([("file_name", "text")])
-    if files_col2 is not None:
-        await files_col2.create_index([("file_name", "text")])
-    print("[DB]: Indexes initialized successfully!", flush=True)
+    await client.execute("""
+        CREATE TABLE IF NOT EXISTS files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT UNIQUE,
+            file_name TEXT,
+            file_size INTEGER,
+            caption TEXT
+        );
+    """)
+    await client.execute("CREATE INDEX IF NOT EXISTS idx_file_name ON files(file_name);")
+    
+    await client.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            is_banned INTEGER DEFAULT 0
+        );
+    """)
+    print("[DB]: Turso 9GB Database Connected & Tables Initialized!", flush=True)
 
-# Select active collection for saving new files
-def get_active_files_col():
-    if USE_SECOND_DB and files_col2 is not None:
-        return files_col2
-    return files_col1
+# --- STATS FUNCTION ---
+async def get_db_stats():
+    res_files = await client.execute("SELECT COUNT(*) FROM files;")
+    total_files = res_files.rows[0][0] if res_files.rows else 0
+    
+    res_users = await client.execute("SELECT COUNT(*) FROM users;")
+    total_users = res_users.rows[0][0] if res_users.rows else 0
+    
+    res_banned = await client.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1;")
+    banned_users = res_banned.rows[0][0] if res_banned.rows else 0
+    
+    return {
+        "total_files": total_files,
+        "total_users": total_users,
+        "banned_users": banned_users,
+        "storage_type": "Turso libSQL (9 GB Free Pool)"
+    }
 
 # --- USER MANAGEMENT (BAN / UNBAN) ---
 async def add_user(user_id: int):
-    await users_col.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
+    await client.execute(
+        "INSERT INTO users (user_id, is_banned) VALUES (?, 0) ON CONFLICT(user_id) DO NOTHING;",
+        [user_id]
+    )
 
 async def ban_user(user_id: int):
-    await users_col.update_one({"user_id": user_id}, {"$set": {"is_banned": True}}, upsert=True)
+    await client.execute(
+        "INSERT INTO users (user_id, is_banned) VALUES (?, 1) ON CONFLICT(user_id) DO UPDATE SET is_banned = 1;",
+        [user_id]
+    )
 
 async def unban_user(user_id: int):
-    await users_col.update_one({"user_id": user_id}, {"$set": {"is_banned": False}}, upsert=True)
+    await client.execute(
+        "UPDATE users SET is_banned = 0 WHERE user_id = ?;",
+        [user_id]
+    )
 
 async def is_user_banned(user_id: int) -> bool:
-    user = await users_col.find_one({"user_id": user_id})
-    return bool(user and user.get("is_banned", False))
+    res = await client.execute("SELECT is_banned FROM users WHERE user_id = ?;", [user_id])
+    if res.rows:
+        return bool(res.rows[0][0])
+    return False
 
 # --- FILE OPERATIONS ---
-async def save_file(file_id: str, file_name: str, file_size: int, caption: str = ""):
-    col = get_active_files_col()
-    data = {
-        "file_id": file_id,
-        "file_name": file_name.lower(),
-        "file_size": file_size,
-        "caption": caption
-    }
-    await col.update_one({"file_id": file_id}, {"$set": data}, upsert=True)
+async def save_file(file_id: str, file_name: str, file_size: int, caption: str = "") -> bool:
+    try:
+        res = await client.execute(
+            "INSERT OR IGNORE INTO files (file_id, file_name, file_size, caption) VALUES (?, ?, ?, ?);",
+            [file_id, file_name.lower(), file_size, caption]
+        )
+        return res.rows_affected > 0
+    except Exception:
+        return False
 
 async def get_file_by_id(db_id: str):
-    # Pehle DB1 me search karega
     try:
-        f = await files_col1.find_one({"_id": ObjectId(db_id)})
-        if f: return f
+        res = await client.execute("SELECT id, file_id, file_name, file_size, caption FROM files WHERE id = ?;", [int(db_id)])
+        if res.rows:
+            r = res.rows[0]
+            return {
+                "_id": r[0],
+                "file_id": r[1],
+                "file_name": r[2],
+                "file_size": r[3],
+                "caption": r[4]
+            }
     except Exception:
         pass
-    
-    # DB1 me na mile toh DB2 me search karega
-    if files_col2 is not None:
-        try:
-            f = await files_col2.find_one({"_id": ObjectId(db_id)})
-            if f: return f
-        except Exception:
-            pass
     return None
 
 async def search_files(query: str, offset: int = 0, limit: int = 10):
     words = query.strip().split()
-    pattern = ".*".join([re.escape(w) for w in words])
-    regex = re.compile(pattern, re.IGNORECASE)
+    like_pattern = "%" + "%".join(words) + "%"
     
-    # DB 1 se search
-    results = await files_col1.find({"file_name": regex}).skip(offset).limit(limit).to_list(length=limit)
+    res = await client.execute(
+        "SELECT id, file_id, file_name, file_size, caption FROM files WHERE file_name LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?;",
+        [like_pattern.lower(), limit, offset]
+    )
     
-    # Agar DB 1 me kam ya limit se kam mile aur DB 2 active ho toh DB 2 se search
-    if files_col2 is not None and len(results) < limit:
-        extra_limit = limit - len(results)
-        results2 = await files_col2.find({"file_name": regex}).skip(offset).limit(extra_limit).to_list(length=extra_limit)
-        results.extend(results2)
-        
+    results = []
+    for r in res.rows:
+        results.append({
+            "_id": r[0],
+            "file_id": r[1],
+            "file_name": r[2],
+            "file_size": r[3],
+            "caption": r[4]
+        })
     return results
 
 async def count_files(query: str) -> int:
     words = query.strip().split()
-    pattern = ".*".join([re.escape(w) for w in words])
-    regex = re.compile(pattern, re.IGNORECASE)
-    
-    count1 = await files_col1.count_documents({"file_name": regex})
-    count2 = await files_col2.count_documents({"file_name": regex}) if files_col2 is not None else 0
-    return count1 + count2
+    like_pattern = "%" + "%".join(words) + "%"
+    res = await client.execute(
+        "SELECT COUNT(*) FROM files WHERE file_name LIKE ?;",
+        [like_pattern.lower()]
+    )
+    return res.rows[0][0] if res.rows else 0
 
 # --- DELETE OPERATIONS ---
-async def delete_single_file(file_id: str):
-    del1 = await files_col1.delete_one({"file_id": file_id})
-    del2 = await files_col2.delete_one({"file_id": file_id}) if files_col2 is not None else None
-    return del1.deleted_count or (del2.deleted_count if del2 else 0)
+async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
+    if file_id:
+        res = await client.execute("DELETE FROM files WHERE file_id = ?;", [file_id])
+        return res.rows_affected
+    elif file_name:
+        words = file_name.strip().split()
+        like_pattern = "%" + "%".join(words) + "%"
+        res = await client.execute("DELETE FROM files WHERE id IN (SELECT id FROM files WHERE file_name LIKE ? LIMIT 1);", [like_pattern.lower()])
+        return res.rows_affected
+    return 0
 
-async def delete_files_by_name(query: str):
+async def delete_files_by_name(query: str) -> int:
     words = query.strip().split()
-    pattern = ".*".join([re.escape(w) for w in words])
-    regex = re.compile(pattern, re.IGNORECASE)
-    
-    del1 = await files_col1.delete_many({"file_name": regex})
-    del2 = await files_col2.delete_many({"file_name": regex}) if files_col2 is not None else None
-    return del1.deleted_count + (del2.deleted_count if del2 else 0)
+    like_pattern = "%" + "%".join(words) + "%"
+    res = await client.execute("DELETE FROM files WHERE file_name LIKE ?;", [like_pattern.lower()])
+    return res.rows_affected
