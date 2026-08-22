@@ -243,7 +243,8 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=240))
+            # Auto delete file after exactly 60 seconds (1 minute) as per caption
+            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
             return
 
     caption_text = ui.get_start_text(first_name)
