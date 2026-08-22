@@ -1,7 +1,8 @@
 import libsql_client
 from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
 
-client = libsql_client.create_client_async(
+# Correct async client method
+client = libsql_client.create_client(
     url=TURSO_DB_URL,
     auth_token=TURSO_AUTH_TOKEN
 )
