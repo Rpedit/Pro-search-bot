@@ -1,3 +1,4 @@
+import re
 import math
 import secrets
 import asyncio
@@ -8,7 +9,7 @@ from pyrogram.types import (
     Message, 
     CallbackQuery
 )
-from pyrogram.errors import UserNotParticipant, MessageNotModified
+from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
@@ -71,7 +72,7 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- 1. STATS / STATUS COMMAND ---
+# --- 1. STATS COMMAND ---
 @bot.on_message(filters.command(["stats", "status"]) & filters.private)
 async def stats_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -87,26 +88,109 @@ async def stats_handler(client: Client, message: Message):
     )
     await message.reply_text(text)
 
-# --- 2. SCREENSHOT REPLIES: GROUP WELCOME & ADDED EVENTS ---
+# --- 2. PRIVATE CHANNEL POST URL/RANGE INDEXER ---
+@bot.on_message(filters.command("index") & filters.private)
+async def batch_index_url(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
+
+    if len(message.command) < 2:
+        return await message.reply_text(
+            "⚠️ **Private Channel Indexing Guide:**\n\n"
+            "👉 **Single Post Link:** `/index https://t.me/c/1234567890/50`\n"
+            "👉 **Range Link:** `/index https://t.me/c/1234567890/10-50`\n\n"
+            "*(Bot ka private channel me added aur admin hona zaroori hai)*"
+        )
+
+    link = message.command[1].strip()
+    
+    # Private Channel Link Regex (e.g. t.me/c/123456789/10 ya 10-50)
+    match = re.match(r"(?:https?://)?(?:www\.)?t\.me/c/(\d+)/(\d+)(?:-(\d+))?", link)
+    if not match:
+        return await message.reply_text("❌ Galat private channel link format! Example: `https://t.me/c/123456789/10-50`")
+
+    channel_id = int(f"-100{match.group(1)}")
+    start_id = int(match.group(2))
+    end_id = int(match.group(3)) if match.group(3) else start_id
+
+    if start_id > end_id:
+        start_id, end_id = end_id, start_id
+
+    total_msgs = (end_id - start_id) + 1
+    status_msg = await message.reply_text(f"⏳ **Indexing start ho rahi hai...**\nTotal Messages: `{total_msgs}`")
+
+    indexed_count = 0
+    skipped_count = 0
+
+    for current_id in range(start_id, end_id + 1):
+        try:
+            msg = await client.get_messages(chat_id=channel_id, message_ids=current_id)
+            if msg and (msg.document or msg.video or msg.audio):
+                media = msg.document or msg.video or msg.audio
+                file_name = getattr(media, "file_name", None) or msg.caption or "Unknown"
+                saved = await db.save_file(
+                    file_id=media.file_id,
+                    file_name=file_name,
+                    file_size=media.file_size,
+                    caption=msg.caption or ""
+                )
+                if saved:
+                    indexed_count += 1
+                else:
+                    skipped_count += 1
+            else:
+                skipped_count += 1
+
+            if (current_id - start_id + 1) % 20 == 0:
+                await status_msg.edit_text(
+                    f"⏳ **Indexing In Progress...**\n\n"
+                    f"Processed: `{current_id - start_id + 1}/{total_msgs}`\n"
+                    f"✅ Indexed: `{indexed_count}`\n"
+                    f"⏩ Skipped/Duplicate: `{skipped_count}`"
+                )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+        except Exception as e:
+            print(f"[Index Loop Error]: {e}", flush=True)
+
+    await status_msg.edit_text(
+        f"🎉 **Indexing Complete!**\n\n"
+        f"✅ **Total Indexed:** `{indexed_count}`\n"
+        f"⏩ **Skipped/Duplicate:** `{skipped_count}`"
+    )
+
+# --- 3. FORWARDED MEDIA INDEXER (DIRECT DM FORWARD SE SAVE) ---
+@bot.on_message(filters.private & filters.forwarded & (filters.document | filters.video | filters.audio))
+async def forward_index_handler(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    media = message.document or message.video or message.audio
+    file_name = getattr(media, "file_name", None) or message.caption or "Unknown"
+    saved = await db.save_file(
+        file_id=media.file_id,
+        file_name=file_name,
+        file_size=media.file_size,
+        caption=message.caption or ""
+    )
+    if saved:
+        await message.reply_text(f"✅ **Saved in 9GB DB:**\n`{file_name}`")
+    else:
+        await message.reply_text(f"⚠️ **File already saved / duplicate:**\n`{file_name}`")
+
+# --- 4. GROUP WELCOME EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
         welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
-        await message.reply_text(
-            text=welcome_user_text,
-            reply_to_message_id=message.id
-        )
+        await message.reply_text(text=welcome_user_text, reply_to_message_id=message.id)
 
         if member.id == client.me.id:
             welcome_text = ui.get_group_welcome_text(message.chat.title)
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
-            await message.reply_text(
-                text=welcome_text,
-                reply_markup=welcome_buttons,
-                reply_to_message_id=message.id
-            )
+            await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
-# --- 3. ADMIN COMMANDS: BAN & UNBAN ---
+# --- 5. ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
 async def ban_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -147,13 +231,12 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- 4. ADMIN COMMANDS: DELETE & DELETEFILES ---
+# --- 6. ADMIN COMMANDS: DELETE & DELETEFILES ---
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
         return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
 
-    # 1. Reply se single file delete
     if message.reply_to_message:
         target_msg = message.reply_to_message
         media = target_msg.document or target_msg.video or target_msg.audio
@@ -169,7 +252,6 @@ async def delete_single_cmd(client: Client, message: Message):
                 return await message.reply_text(f"🗑️ `{name_query}` database se delete kar di gayi hai.")
             return await message.reply_text("⚠️ File database me nahi mili.")
 
-    # 2. Movie Name se delete
     if len(message.command) > 1:
         name_query = message.text.split(None, 1)[1].strip()
         count = await db.delete_single_file(file_name=name_query)
@@ -177,7 +259,7 @@ async def delete_single_cmd(client: Client, message: Message):
             return await message.reply_text(f"🗑️ `{name_query}` file delete kar di gayi hai.")
         return await message.reply_text("⚠️ File database me nahi mili.")
 
-    await message.reply_text("⚠️ Usage: File ko reply karke `/delete` ya `/delete Movie_Name` likhein.")
+    await message.reply_text("⚠️ File ko reply karke `/delete` ya `/delete Movie_Name` likhein.")
 
 @bot.on_message(filters.command(["deletefiles", "deleteall", "delall"]))
 async def delete_files_cmd(client: Client, message: Message):
@@ -192,7 +274,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
-# --- 5. START COMMAND (BOT PRIVATE CHAT) ---
+# --- 7. START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -203,7 +285,6 @@ async def start_handler(client: Client, message: Message):
 
     await db.add_user(user_id)
 
-    # Force Subscribe Check
     if not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         buttons = ui.get_fsub_buttons(invite_link, client.me.username)
@@ -221,7 +302,7 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Group Button Se Aayi Hui File (Group Deep Link)
+    # Deep-link file delivery (Group button se aane par)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -251,7 +332,7 @@ async def start_handler(client: Client, message: Message):
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-# --- 6. AUTO INDEX IN DB CHANNEL ---
+# --- 8. AUTO INDEX IN DB CHANNEL ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -266,8 +347,8 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- 7. SEARCH HANDLER (BOX / QUOTE REPLY) ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status"]))
+# --- 9. SEARCH HANDLER ---
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status", "index"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
@@ -315,7 +396,7 @@ async def filter_search(client: Client, message: Message):
 
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
-# --- 8. CALLBACK ROUTER ---
+# --- 10. CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
