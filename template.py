@@ -30,10 +30,11 @@ def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
-# Jab koi naya user ya bot group join karta hai tab welcome text
-def get_user_welcome_text(user_first_name: str, group_title: str) -> str:
+# Jab koi naya member ya bot group join karta hai tab welcome text (Mention Link ke sath)
+def get_user_welcome_text(user_first_name: str, user_id: int, group_title: str) -> str:
+    user_mention = f"[{user_first_name}](tg://user?id={user_id})"
     return (
-        f"**Hey ❤️ {user_first_name} ,**\n"
+        f"**Hey ❤️ {user_mention} ,**\n"
         f"**Welcome to {group_title}.../**"
     )
 
