@@ -7,7 +7,7 @@ from config import DATABASE_URI_1, DATABASE_URI_2, USE_SECOND_DB
 client1 = AsyncIOMotorClient(DATABASE_URI_1)
 db1 = client1["TelegramAutoFilterBot"]
 files_col1 = db1["files"]
-users_col = db1["users"]  # Users & Ban list Primary DB me rahegi
+users_col = db1["users"]
 
 # --- DB 2 (SECONDARY / BACKUP) ---
 client2 = AsyncIOMotorClient(DATABASE_URI_2) if DATABASE_URI_2 else None
@@ -20,13 +20,12 @@ async def init_db():
         await files_col2.create_index([("file_name", "text")])
     print("[DB]: Indexes initialized successfully!", flush=True)
 
-# Select active collection for saving new files
 def get_active_files_col():
     if USE_SECOND_DB and files_col2 is not None:
         return files_col2
     return files_col1
 
-# --- BOT & DATABASE STATS ---
+# --- STATS ---
 async def get_db_stats():
     total_users = await users_col.count_documents({})
     banned_users = await users_col.count_documents({"is_banned": True})
@@ -44,7 +43,7 @@ async def get_db_stats():
         "active_db": "Database 2" if (USE_SECOND_DB and files_col2 is not None) else "Database 1"
     }
 
-# --- USER MANAGEMENT (BAN / UNBAN) ---
+# --- USER MANAGEMENT ---
 async def add_user(user_id: int):
     await users_col.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
 
@@ -67,7 +66,6 @@ async def save_file(file_id: str, file_name: str, file_size: int, caption: str =
         "file_size": file_size,
         "caption": caption
     }
-    # Check if file already exists in active DB (Duplicate check)
     existing = await col.find_one({"file_id": file_id})
     if not existing:
         await col.update_one({"file_id": file_id}, {"$set": data}, upsert=True)
@@ -75,14 +73,12 @@ async def save_file(file_id: str, file_name: str, file_size: int, caption: str =
     return False
 
 async def get_file_by_id(db_id: str):
-    # Pehle DB1 me search karega
     try:
         f = await files_col1.find_one({"_id": ObjectId(db_id)})
         if f: return f
     except Exception:
         pass
     
-    # DB1 me na mile toh DB2 me search karega
     if files_col2 is not None:
         try:
             f = await files_col2.find_one({"_id": ObjectId(db_id)})
@@ -96,15 +92,11 @@ async def search_files(query: str, offset: int = 0, limit: int = 10):
     pattern = ".*".join([re.escape(w) for w in words])
     regex = re.compile(pattern, re.IGNORECASE)
     
-    # DB 1 se search
     results = await files_col1.find({"file_name": regex}).skip(offset).limit(limit).to_list(length=limit)
-    
-    # Agar DB 1 me kam ya limit se kam mile aur DB 2 active ho toh DB 2 se search
     if files_col2 is not None and len(results) < limit:
         extra_limit = limit - len(results)
         results2 = await files_col2.find({"file_name": regex}).skip(offset).limit(extra_limit).to_list(length=extra_limit)
         results.extend(results2)
-        
     return results
 
 async def count_files(query: str) -> int:
