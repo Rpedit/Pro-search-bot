@@ -1,3 +1,7 @@
+# =========================================================
+# FILE NAME: database.py
+# =========================================================
+
 # --- DATABASE CLIENT & CONFIG IMPORT ---
 import libsql_client  # Turso (libSQL/SQLite) cloud database client library
 from config import TURSO_DB_URL, TURSO_AUTH_TOKEN  # Cloud URL aur JWT token import
@@ -63,7 +67,7 @@ async def get_db_stats():
     }
 
 
-# --- 3. USER MANAGEMENT (BAN / UNBAN) ---
+# --- 3. USER MANAGEMENT (BAN / UNBAN / BROADCAST) ---
 
 # Naye user ko database me insert karta hai (Duplicate hone par ignore karega)
 async def add_user(user_id: int):
@@ -92,6 +96,11 @@ async def is_user_banned(user_id: int) -> bool:
     if res.rows:
         return bool(res.rows[0][0])
     return False
+
+# Broadcast ke liye sabhi active (unbanned) users ki IDs fetch karta hai
+async def get_all_users():
+    res = await client.execute("SELECT user_id FROM users WHERE is_banned = 0;")
+    return [r[0] for r in res.rows] if res.rows else []
 
 
 # --- 4. FILE STORAGE & SEARCH OPERATIONS ---
