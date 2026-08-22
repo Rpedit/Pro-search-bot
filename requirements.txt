@@ -1,6 +1,6 @@
 pyrogram==2.0.106
 tgcrypto==1.2.5
-libsql-client
+libsql-client[http]
 aiohttp==3.9.5
 python-dotenv==1.0.1
 uvicorn==0.29.0
