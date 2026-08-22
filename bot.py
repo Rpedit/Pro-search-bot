@@ -40,18 +40,13 @@ async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, fi
     """Wait -> Delete Message -> Send Standalone Warning Alert -> Delete Alert Later"""
     await asyncio.sleep(delay)
     try:
-        # 1. Target message delete karo
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
-        
-        # 2. Warning message direct send karo (No box/reply header)
         alert_text = ui.get_deleted_alert_text(first_name, user_id)
         alert_msg = await client.send_message(
             chat_id=chat_id, 
             text=alert_text,
             disable_web_page_preview=True
         )
-        
-        # 3. Warning Alert 10 minute (600s) baad delete karo
         asyncio.create_task(auto_delete_msg(client, chat_id, alert_msg.id, delay=600))
     except Exception as e:
         print(f"[AutoDelete Warn Error]: {e}", flush=True)
@@ -76,18 +71,32 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- SCREENSHOT REPLIES: GROUP WELCOME & ADDED EVENTS ---
+# --- 1. STATS / STATUS COMMAND ---
+@bot.on_message(filters.command(["stats", "status"]) & filters.private)
+async def stats_handler(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
+
+    stats = await db.get_db_stats()
+    text = (
+        "📊 **Bot & Database Statistics:**\n\n"
+        f"📁 **Total Files in DB:** `{stats['total_files']}`\n"
+        f"🗄️ **Storage Engine:** `{stats['storage_type']}`\n\n"
+        f"👥 **Total Users:** `{stats['total_users']}`\n"
+        f"🚫 **Banned Users:** `{stats['banned_users']}`"
+    )
+    await message.reply_text(text)
+
+# --- 2. SCREENSHOT REPLIES: GROUP WELCOME & ADDED EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
-        # Box 1: Welcome Added User/Bot (Reply quote to the add event)
         welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
         await message.reply_text(
             text=welcome_user_text,
             reply_to_message_id=message.id
         )
 
-        # Box 2: If bot itself is added -> Thankyou Reply Box with Help/Tutorial Buttons
         if member.id == client.me.id:
             welcome_text = ui.get_group_welcome_text(message.chat.title)
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
@@ -97,7 +106,7 @@ async def group_welcome_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-# --- ADMIN COMMANDS: BAN & UNBAN ---
+# --- 3. ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
 async def ban_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -138,7 +147,7 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- ADMIN COMMANDS: DELETE & DELETEFILES ---
+# --- 4. ADMIN COMMANDS: DELETE & DELETEFILES ---
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -148,18 +157,25 @@ async def delete_single_cmd(client: Client, message: Message):
     if message.reply_to_message:
         target_msg = message.reply_to_message
         media = target_msg.document or target_msg.video or target_msg.audio
-        if not media:
-            return await message.reply_text("⚠️ Reply kiye gaye message me koi media nahi hai.")
-        deleted = await db.delete_single_file(media.file_id)
-        if deleted:
-            return await message.reply_text("🗑️ File database se delete kar di gayi hai.")
-        return await message.reply_text("⚠️ File database me nahi mili.")
+        if media:
+            deleted = await db.delete_single_file(file_id=media.file_id)
+            if deleted:
+                return await message.reply_text("🗑️ File database se delete kar di gayi hai.")
+            return await message.reply_text("⚠️ File database me nahi mili.")
+        elif target_msg.text or target_msg.caption:
+            name_query = target_msg.text or target_msg.caption
+            deleted = await db.delete_single_file(file_name=name_query)
+            if deleted:
+                return await message.reply_text(f"🗑️ `{name_query}` database se delete kar di gayi hai.")
+            return await message.reply_text("⚠️ File database me nahi mili.")
 
     # 2. Movie Name se delete
     if len(message.command) > 1:
         name_query = message.text.split(None, 1)[1].strip()
-        count = await db.delete_files_by_name(name_query)
-        return await message.reply_text(f"🗑️ `{name_query}` ki **{count} files** delete kar di gayi hain.")
+        count = await db.delete_single_file(file_name=name_query)
+        if count:
+            return await message.reply_text(f"🗑️ `{name_query}` file delete kar di gayi hai.")
+        return await message.reply_text("⚠️ File database me nahi mili.")
 
     await message.reply_text("⚠️ Usage: File ko reply karke `/delete` ya `/delete Movie_Name` likhein.")
 
@@ -176,7 +192,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
-# --- START COMMAND (BOT PRIVATE CHAT) ---
+# --- 5. START COMMAND (BOT PRIVATE CHAT) ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -205,8 +221,7 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Group Button Se Aayi Hui File (Group Deep Link):
-    # Rule: 4 min me file delete hogi lekin WARNING NAHI AAYEGI
+    # Group Button Se Aayi Hui File (Group Deep Link)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -233,11 +248,10 @@ async def start_handler(client: Client, message: Message):
     except Exception:
         sent_start = await message.reply_text(text=caption_text, reply_markup=markup)
 
-    # Start message deletes after 1 day (86400 seconds)
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-# --- AUTO INDEX IN DB CHANNEL ---
+# --- 6. AUTO INDEX IN DB CHANNEL ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -252,8 +266,8 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER (BOX / QUOTE REPLY) ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall"]))
+# --- 7. SEARCH HANDLER (BOX / QUOTE REPLY) ---
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
@@ -276,7 +290,6 @@ async def filter_search(client: Client, message: Message):
     query = message.text.strip()
     total_results = await db.count_files(query)
 
-    # Not Found Message with Quote Box (5 minutes / 300s auto delete)
     if total_results == 0:
         no_res_msg = await message.reply_text(
             text=ui.get_no_results_text(),
@@ -294,23 +307,20 @@ async def filter_search(client: Client, message: Message):
     caption_text = ui.get_search_caption(first_name, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
-    # Search result message with Quote Box (4.5 minutes / 270s auto delete)
     search_msg = await message.reply_text(
         text=caption_text, 
         reply_markup=keyboard,
         reply_to_message_id=message.id
     )
 
-    # Buttons 4.5 min me delete honge aur Warning Alert aayega
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
-# --- CALLBACK ROUTER ---
+# --- 8. CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    # Search Guide Message Button (Auto-deletes in 1 Day / 86400s)
     if data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
@@ -349,7 +359,7 @@ async def callback_router(client: Client, query: CallbackQuery):
 async def main():
     await db.init_db()
     await bot.start()
-    print(">>> BOT IS ONLINE AND LISTENING <<<", flush=True)
+    print(">>> BOT IS ONLINE (CONNECTED TO TURSO 9GB DB) <<<", flush=True)
     await idle()
     await bot.stop()
 
