@@ -13,15 +13,12 @@ FSUB_CHANNEL = os.getenv("FSUB_CHANNEL", "-1002855667443").replace("@", "https:/
 ADMINS_RAW = os.getenv("ADMINS", "7067885693")
 ADMINS = [int(x) for x in ADMINS_RAW.split() if x.strip().lstrip("-").isdigit()]
 
-# --- DUAL MONGO DATABASE SETTINGS ---
-# Database 1 (Primary)
-DATABASE_URI_1 = os.getenv("DATABASE_URI_1", os.getenv("MONGO_URI", "mongodb+srv://rpeditz:rpeditz@rpeditz.tzgtpiq.mongodb.net/?retryWrites=true&w=majority&appName=rpeditz"))
-
-# Database 2 (Secondary / Backup)
-DATABASE_URI_2 = os.getenv("DATABASE_URI_2", "").strip()
-
-# Switch: 'True' karne par DB2 me save hoga, 'False' par DB1 me
-USE_SECOND_DB = os.getenv("USE_SECOND_DB", "False").lower() in ["true", "1"]
+# --- TURSO DATABASE SETTINGS (9 GB FREE) ---
+TURSO_DB_URL = os.getenv("TURSO_DB_URL", "libsql://movie-db-rpedit.aws-ap-south-1.turso.io")
+TURSO_AUTH_TOKEN = os.getenv(
+    "TURSO_AUTH_TOKEN", 
+    "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODc0MDY4NjQsImlkIjoiMDFhMDI5YmEtNDAwMS03M2VhLTg3NzgtZjgxNjY0NjFjNWE5Iiwia2lkIjoicm5TUVdMeFNSUWxERkxfUTgwZzhzYi1haE81emZuM1lMR2cwQzhVSDZ3TSIsInJpZCI6IjBhOGQwOWIwLWI0MTMtNGEwMy1iZDNlLTExZDFjOTc1NGFmNiJ9.dJaBdMA-5CmlwLM-BSEpIEHmTquq1OO4hv1Y24WGO5IL46br2lC1VbCjeQjwR3TjFN0WKWO97E6S8GyC2y_yCw"
+)
 
 # Shortener Settings (Optional)
 SHORTENER_API = os.getenv("SHORTENER_API", "").strip()
