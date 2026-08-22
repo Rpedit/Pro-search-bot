@@ -23,14 +23,26 @@ bot = Client(
 
 SEARCH_CACHE = {}
 
-# --- 4-MINUTE IN-BUILT AUTO DELETE SYSTEM ---
-async def auto_delete_file(client: Client, chat_id: int, message_id: int, first_name: str, delay: int = 240):
-    """Wait for 4 minutes (240s) -> Delete File -> Send Copyright Alert"""
+# --- GENERAL AUTO DELETE HELPER ---
+async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
+    """Delete any message after specified delay in seconds"""
+    await asyncio.sleep(delay)
+    try:
+        await client.delete_messages(chat_id=chat_id, message_ids=message_id)
+    except Exception:
+        pass
+
+# --- FILE AUTO DELETE + 10 MIN ALERT DELETION ---
+async def auto_delete_file_handler(client: Client, chat_id: int, message_id: int, first_name: str, delay: int = 240):
+    """4 min file delete -> send alert -> 10 min alert auto-delete"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
         alert_text = ui.get_deleted_alert_text(first_name)
-        await client.send_message(chat_id=chat_id, text=alert_text)
+        alert_msg = await client.send_message(chat_id=chat_id, text=alert_text)
+        
+        # Warning message deletes after 10 minutes (600 seconds)
+        asyncio.create_task(auto_delete_msg(client, chat_id, alert_msg.id, delay=600))
     except Exception as e:
         print(f"[AutoDelete Error]: {e}", flush=True)
 
@@ -54,7 +66,7 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- START COMMAND ---
+# --- START COMMAND (1-DAY AUTO DELETE) ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -77,7 +89,7 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons
             )
 
-    # Deep Link Handler (Direct Send + 4-Min Auto Delete + Alert Trigger)
+    # Deep Link Handler (File Delivery: 4 min delete -> 10 min alert delete)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -88,21 +100,26 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            # Auto delete in 4 minutes (240 seconds)
-            asyncio.create_task(auto_delete_file(client, user_id, sent_msg.id, first_name=first_name, delay=240))
+            # Auto delete file in 4 minutes (240s)
+            asyncio.create_task(auto_delete_file_handler(client, user_id, sent_msg.id, first_name=first_name, delay=240))
             return
 
     caption_text = ui.get_start_text(first_name)
     markup = ui.get_start_buttons(client.me.username)
 
+    sent_start = None
     try:
-        await message.reply_photo(
+        sent_start = await message.reply_photo(
             photo=ui.START_PIC,
             caption=caption_text,
             reply_markup=markup
         )
     except Exception:
-        await message.reply_text(text=caption_text, reply_markup=markup)
+        sent_start = await message.reply_text(text=caption_text, reply_markup=markup)
+
+    # Start message deletes after 1 day (86400 seconds)
+    if sent_start:
+        asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
 # --- AUTO INDEX IN DB CHANNEL ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
@@ -119,7 +136,7 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER ---
+# --- SEARCH HANDLER (BUTTONS 4.5 MIN AUTO DELETE) ---
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -152,7 +169,10 @@ async def filter_search(client: Client, message: Message):
     caption_text = ui.get_search_caption(first_name, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
-    await message.reply_text(text=caption_text, reply_markup=keyboard)
+    search_msg = await message.reply_text(text=caption_text, reply_markup=keyboard)
+
+    # Search result buttons delete in 4.5 minutes (270s)
+    asyncio.create_task(auto_delete_msg(client, user_id, search_msg.id, delay=270))
 
 # --- CALLBACK ROUTER ---
 @bot.on_callback_query()
@@ -160,11 +180,13 @@ async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    # Search Guide Message Button
+    # Search Guide Message Button (Auto-deletes in 5 min)
     if data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
-        return await query.message.reply_text(text=guide_text)
+        guide_msg = await query.message.reply_text(text=guide_text)
+        asyncio.create_task(auto_delete_msg(client, query.from_user.id, guide_msg.id, delay=300))
+        return
 
     elif data.startswith("page_"):
         try:
