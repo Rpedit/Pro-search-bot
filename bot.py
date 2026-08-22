@@ -25,26 +25,33 @@ SEARCH_CACHE = {}
 
 # --- GENERAL AUTO DELETE HELPER ---
 async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
-    """Delete any message safely after specified delay in seconds"""
+    """Delete any message safely without warning"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
     except Exception:
         pass
 
-# --- FILE AUTO DELETE + 10 MIN ALERT DELETION ---
-async def auto_delete_file_handler(client: Client, chat_id: int, message_id: int, first_name: str, delay: int = 240):
-    """4 min file delete -> send alert -> 10 min alert auto-delete"""
+# --- DELETE TARGET & SEND WARNING ALERT ---
+async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, first_name: str, user_id: int, delay: int):
+    """Wait -> Delete Message -> Send Standalone Warning Alert -> Delete Alert Later"""
     await asyncio.sleep(delay)
     try:
+        # 1. Target message delete karo
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
-        alert_text = ui.get_deleted_alert_text(first_name)
-        alert_msg = await client.send_message(chat_id=chat_id, text=alert_text)
         
-        # Warning alert message deletes after 10 minutes (600 seconds)
+        # 2. Warning message direct send karo (No box/reply header)
+        alert_text = ui.get_deleted_alert_text(first_name, user_id)
+        alert_msg = await client.send_message(
+            chat_id=chat_id, 
+            text=alert_text,
+            disable_web_page_preview=True
+        )
+        
+        # 3. Warning Alert 10 minute (600s) baad delete karo
         asyncio.create_task(auto_delete_msg(client, chat_id, alert_msg.id, delay=600))
     except Exception as e:
-        print(f"[AutoDelete Error]: {e}", flush=True)
+        print(f"[AutoDelete Warn Error]: {e}", flush=True)
 
 async def get_fsub_link(client: Client):
     if isinstance(FSUB_CHANNEL, int):
@@ -66,7 +73,21 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- START COMMAND (1-DAY AUTO DELETE) ---
+# --- BOT ADDED TO GROUP WELCOME EVENT ---
+@bot.on_message(filters.group & filters.new_chat_members)
+async def group_welcome(client: Client, message: Message):
+    for member in message.new_chat_members:
+        if member.id == client.me.id:
+            welcome_text = ui.get_group_welcome_text(message.chat.title)
+            welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
+            await client.send_message(
+                chat_id=message.chat.id,
+                text=welcome_text,
+                reply_markup=welcome_buttons
+            )
+            break
+
+# --- START COMMAND (BOT PRIVATE CHAT) ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -91,7 +112,8 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Deep Link Handler (File Delivery: 4 min delete -> 10 min alert delete)
+    # Group Button Se Aayi Hui File (Group Deep Link):
+    # Rule: 4 min me file delete hogi lekin WARNING NAHI AAYEGI
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -102,8 +124,8 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            # Auto delete file in 4 minutes (240s)
-            asyncio.create_task(auto_delete_file_handler(client, user_id, sent_msg.id, first_name=first_name, delay=240))
+            # Sirf file delete hogi (No warning message)
+            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=240))
             return
 
     caption_text = ui.get_start_text(first_name)
@@ -145,6 +167,7 @@ async def filter_search(client: Client, message: Message):
         return
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "User"
+    chat_id = message.chat.id
 
     if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
@@ -164,7 +187,7 @@ async def filter_search(client: Client, message: Message):
             text=ui.get_no_results_text(),
             reply_to_message_id=message.id
         )
-        asyncio.create_task(auto_delete_msg(client, user_id, no_res_msg.id, delay=300))
+        asyncio.create_task(auto_delete_msg(client, chat_id, no_res_msg.id, delay=300))
         return
 
     query_id = secrets.token_hex(4)
@@ -183,7 +206,8 @@ async def filter_search(client: Client, message: Message):
         reply_to_message_id=message.id
     )
 
-    asyncio.create_task(auto_delete_msg(client, user_id, search_msg.id, delay=270))
+    # Buttons 4.5 min me delete honge aur Warning Alert aayega
+    asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
 # --- CALLBACK ROUTER ---
 @bot.on_callback_query()
@@ -196,7 +220,7 @@ async def callback_router(client: Client, query: CallbackQuery):
         await query.answer()
         guide_text = ui.get_search_guide_text()
         guide_msg = await query.message.reply_text(text=guide_text)
-        asyncio.create_task(auto_delete_msg(client, query.from_user.id, guide_msg.id, delay=86400))
+        asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
         return
 
     elif data.startswith("page_"):
