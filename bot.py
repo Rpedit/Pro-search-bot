@@ -15,10 +15,11 @@ from pyrogram.types import (
 )
 from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
 
-# Config, Database aur UI Template imports
+# Config, Database, Broadcast aur UI Template imports
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
+from broadcast import handle_broadcast
 
 bot = Client(
     "AutoFilterBot",
@@ -94,7 +95,12 @@ async def stats_handler(client: Client, message: Message):
     )
     await message.reply_text(text)
 
-# --- 2. GROUP WELCOME EVENTS ---
+# --- 2. BROADCAST COMMAND ---
+@bot.on_message(filters.command(["broadcast", "bcast"]) & filters.private)
+async def broadcast_router(client: Client, message: Message):
+    await handle_broadcast(client, message)
+
+# --- 3. GROUP WELCOME EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
@@ -106,7 +112,7 @@ async def group_welcome_handler(client: Client, message: Message):
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
             await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
-# --- 3. ADMIN COMMANDS: BAN & UNBAN ---
+# --- 4. ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
 async def ban_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -147,7 +153,7 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- 4. ADMIN COMMANDS: FILE DELETION ---
+# --- 5. ADMIN COMMANDS: FILE DELETION ---
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -190,7 +196,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
-# --- 5. START COMMAND & FILE DELIVERY ---
+# --- 6. START COMMAND & FILE DELIVERY ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -247,7 +253,7 @@ async def start_handler(client: Client, message: Message):
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-# --- 6. AUTO INDEX IN DB CHANNEL ---
+# --- 7. AUTO INDEX IN DB CHANNEL ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -262,8 +268,8 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- 7. MOVIE SEARCH HANDLER ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status"]))
+# --- 8. MOVIE SEARCH HANDLER ---
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status", "broadcast", "bcast"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
@@ -311,7 +317,7 @@ async def filter_search(client: Client, message: Message):
 
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
-# --- 8. CALLBACK ROUTER ---
+# --- 9. CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
