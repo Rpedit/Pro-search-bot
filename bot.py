@@ -22,7 +22,6 @@ bot = Client(
 )
 
 SEARCH_CACHE = {}
-INDEX_DATA = {}
 CURRENT_SKIP = 0
 INDEX_RUNNING = False
 
@@ -123,84 +122,169 @@ async def cancel_index_handler(client: Client, message: Message):
     INDEX_RUNNING = False
     await message.reply_text("🛑 **Stopping Indexing...** Process cancel kiya ja raha hai.")
 
-# --- 4. INDEX CONFIRMATION / PROMPT (SCREENSHOT UI) ---
+# --- 4. DIRECT CHANNEL INDEX COMMAND ---
 @bot.on_message(filters.command("index") & filters.private)
-async def index_prompt_handler(client: Client, message: Message):
-    global CURRENT_SKIP
+async def bulk_index_handler(client: Client, message: Message):
+    global CURRENT_SKIP, INDEX_RUNNING
     if not is_admin(message.from_user.id):
         return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
 
     if INDEX_RUNNING:
         return await message.reply_text("⚠️ Indexing pehle se chal rahi hai! Rokne ke liye `/cancel` likhein.")
 
-    chat_target = None
-    last_msg_id = 0
+    if len(message.command) < 2:
+        return await message.reply_text("⚠️ Channel mention karein:\n👉 `/index @channel_username` ya `/index -1001234567890`")
 
-    if message.reply_to_message:
-        reply = message.reply_to_message
-        fwd_chat = getattr(reply, "forward_from_chat", None) or getattr(reply, "sender_chat", None)
-        
-        if not fwd_chat:
-            return await message.reply_text("⚠️ Jis message ko reply kiya hai, wo channel se forwarded message hona chahiye!")
+    chat_target = message.command[1].strip()
+    try:
+        chat_target = int(chat_target)
+    except ValueError:
+        pass
 
-        chat_target = fwd_chat.id
-        last_msg_id = reply.forward_from_message_id or reply.id
+    try:
+        chat = await client.get_chat(chat_target)
+    except Exception as e:
+        return await message.reply_text(f"❌ **Channel Error:** `{e}`\n\n*Check karein bot channel me Admin hai ya nahi.*")
 
-    elif len(message.command) > 1:
-        raw_target = message.command[1].strip()
-        try:
-            chat_target = int(raw_target)
-        except ValueError:
-            chat_target = raw_target
-        try:
-            chat = await client.get_chat(chat_target)
-            chat_target = chat.id
-            last_msg_id = 0
-        except Exception as e:
-            return await message.reply_text(f"❌ Error: `{e}`")
-    else:
-        return await message.reply_text(
-            "⚠️ **Index Kaise Karein:**\n\n"
-            "1. Channel se koi bhi latest message forward karein aur reply me likhein: `/index`\n"
-            "2. Direct channel likhein: `/index @channel_username`"
-        )
-
-    # Cache index job details
-    job_id = secrets.token_hex(4)
-    INDEX_DATA[job_id] = {
-        "chat_id": chat_target,
-        "last_id": last_msg_id
-    }
-
-    # Screenshot Exact Text & Buttons UI
-    confirm_text = (
-        "Do you Want To Index This Channel/\n"
-        "Group ?\n\n"
-        f"Chat ID/ Username: {chat_target}\n"
-        f"Last Message ID: {last_msg_id if last_msg_id else 'Fetch All'}\n\n"
-        "**NEED SETSKIP 👉** /setskip"
+    INDEX_RUNNING = True
+    start_id = CURRENT_SKIP if CURRENT_SKIP > 0 else 1
+    status_msg = await message.reply_text(
+        f"🚀 **Indexing Started:** `{chat.title}`\n\n"
+        f"🔘 **Starting From Msg ID:** `{start_id}`\n"
+        f"⏳ Processing files..."
     )
 
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Yes", callback_data=f"idx_start_{job_id}")],
-        [InlineKeyboardButton("Close", callback_data=f"idx_close_{job_id}")]
-    ])
+    total_scanned = 0
+    added_files = 0
+    skipped_files = 0
+    current_msg_id = start_id
 
-    await message.reply_text(text=confirm_text, reply_markup=buttons, reply_to_message_id=message.id)
+    try:
+        while INDEX_RUNNING:
+            batch_ids = list(range(current_msg_id, current_msg_id + 100))
+            try:
+                messages = await client.get_messages(chat.id, batch_ids)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                continue
+            except Exception:
+                break
 
-# --- SCREENSHOT REPLIES: GROUP WELCOME & ADDED EVENTS ---
-@bot.on_message(filters.group & filters.new_chat_members)
-async def group_welcome_handler(client: Client, message: Message):
-    for member in message.new_chat_members:
-        welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
-        await message.reply_text(text=welcome_user_text, reply_to_message_id=message.id)
+            if not messages:
+                break
 
-        if member.id == client.me.id:
-            welcome_text = ui.get_group_welcome_text(message.chat.title)
-            welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
-            await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
+            for msg in messages:
+                if not INDEX_RUNNING:
+                    break
+                if not msg or msg.empty:
+                    continue
 
-# --- ADMIN COMMANDS: BAN & UNBAN ---
+                media = msg.document or msg.video or msg.audio
+                if media:
+                    total_scanned += 1
+                    file_name = getattr(media, "file_name", None) or msg.caption or "Unknown"
+
+                    is_saved = await db.save_file(
+                        file_id=media.file_id,
+                        file_name=file_name,
+                        file_size=media.file_size,
+                        caption=msg.caption or ""
+                    )
+
+                    if is_saved:
+                        added_files += 1
+                    else:
+                        skipped_files += 1
+
+            current_msg_id = batch_ids[-1] + 1
+            CURRENT_SKIP = current_msg_id
+
+            if total_scanned > 0 and total_scanned % 20 == 0:
+                try:
+                    await status_msg.edit_text(
+                        f"📊 **Indexing In Progress...**\n\n"
+                        f"📢 **Channel:** `{chat.title}`\n"
+                        f"🔢 **Current Msg ID:** `{current_msg_id}`\n\n"
+                        f"✅ **Added Files:** `{added_files}`\n"
+                        f"⏭️ **Skipped (Old):** `{skipped_files}`\n"
+                        f"📁 **Total Scanned:** `{total_scanned}`\n\n"
+                        f"🛑 *Stop karne ke liye `/cancel` likhein.*"
+                    )
+                except Exception:
+                    pass
+                await asyncio.sleep(0.3)
+
+        if INDEX_RUNNING:
+            await status_msg.edit_text(
+                f"🎉 **Indexing Completed!**\n\n"
+                f"📢 **Channel:** `{chat.title}`\n"
+                f"✅ **Total Added:** `{added_files}`\n"
+                f"⏭️ **Total Skipped:** `{skipped_files}`\n"
+                f"📁 **Total Scanned:** `{total_scanned}`\n"
+                f"🔢 **Last Message ID:** `{current_msg_id}`"
+            )
+
+    except Exception as e:
+        await message.reply_text(f"⚠️ **Error:** `{e}`\n\n💡 Resume: `/setskip {current_msg_id}` fir `/index {chat_target}`")
+    finally:
+        INDEX_RUNNING = False
+
+# --- 5. ADMIN COMMANDS: DELETE (BY REPLY/FORWARD OR NAME) ---
+@bot.on_message(filters.command("delete"))
+async def delete_single_cmd(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
+
+    # 1. Forward ya normal media message ko reply karke delete
+    if message.reply_to_message:
+        target_msg = message.reply_to_message
+        media = target_msg.document or target_msg.video or target_msg.audio
+        
+        if media:
+            deleted = await db.delete_single_file(file_id=media.file_id)
+            if deleted:
+                return await message.reply_text("🗑️ File database se successfully delete kar di gayi hai.")
+            else:
+                return await message.reply_text("⚠️ Ye file database me nahi mili.")
+        
+        elif target_msg.text or target_msg.caption:
+            query_name = target_msg.text or target_msg.caption
+            deleted = await db.delete_single_file(file_name=query_name)
+            if deleted:
+                return await message.reply_text(f"🗑️ `{query_name}` database se delete kar di gayi hai.")
+            else:
+                return await message.reply_text("⚠️ Ye file database me nahi mili.")
+
+    # 2. Direct naam se single delete: /delete Movie_Name
+    if len(message.command) > 1:
+        name_query = message.text.split(None, 1)[1].strip()
+        deleted = await db.delete_single_file(file_name=name_query)
+        if deleted:
+            return await message.reply_text(f"🗑️ `{name_query}` file database se delete kar di gayi hai.")
+        else:
+            return await message.reply_text(f"❌ Database me `{name_query}` ki koi file nahi mili.")
+
+    await message.reply_text("⚠️ **Usage:**\n1. Forwarded file ko reply karke: `/delete`\n2. Direct naam likhein: `/delete Movie_Name`")
+
+# --- 6. ADMIN COMMANDS: DELETEFILES (ALL MATCHING FILES) ---
+@bot.on_message(filters.command(["deletefiles", "deleteall", "delall"]))
+async def delete_files_cmd(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
+
+    if len(message.command) < 2:
+        return await message.reply_text("⚠️ Movie ka naam likhein:\n👉 `/deletefiles Mad Concrete Dreams`")
+
+    movie_name = message.text.split(None, 1)[1].strip()
+    status_msg = await message.reply_text(f"🔍 `{movie_name}` ki saari files delete ho rahi hain...")
+    
+    deleted_count = await db.delete_files_by_name(movie_name)
+    if deleted_count > 0:
+        await status_msg.edit_text(f"✅ **Success:** `{movie_name}` se judi kul **{deleted_count} files** delete kar di gayi hain.")
+    else:
+        await status_msg.edit_text(f"❌ Database me `{movie_name}` ki koi file nahi mili.")
+
+# --- 7. ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
 async def ban_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -216,7 +300,7 @@ async def ban_handler(client: Client, message: Message):
             return await message.reply_text("⚠️ Sahi numeric user ID dalein.")
 
     if not target_id:
-        return await message.reply_text("⚠️ Usage: `/ban user_id` ya message ko reply karein.")
+        return await message.reply_text("⚠️ Usage: `/ban user_id` ya reply karein.")
 
     await db.ban_user(target_id)
     await message.reply_text(f"🚫 User `{target_id}` ko ban kar diya gaya hai.")
@@ -236,46 +320,22 @@ async def unban_handler(client: Client, message: Message):
             return await message.reply_text("⚠️ Sahi numeric user ID dalein.")
 
     if not target_id:
-        return await message.reply_text("⚠️ Usage: `/unban user_id` ya message ko reply karein.")
+        return await message.reply_text("⚠️ Usage: `/unban user_id` ya reply karein.")
 
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- ADMIN COMMANDS: DELETE & DELETEFILES ---
-@bot.on_message(filters.command("delete"))
-async def delete_single_cmd(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
+# --- GROUP WELCOME EVENTS ---
+@bot.on_message(filters.group & filters.new_chat_members)
+async def group_welcome_handler(client: Client, message: Message):
+    for member in message.new_chat_members:
+        welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
+        await message.reply_text(text=welcome_user_text, reply_to_message_id=message.id)
 
-    if message.reply_to_message:
-        target_msg = message.reply_to_message
-        media = target_msg.document or target_msg.video or target_msg.audio
-        if not media:
-            return await message.reply_text("⚠️ Reply kiye gaye message me koi media nahi hai.")
-        deleted = await db.delete_single_file(media.file_id)
-        if deleted:
-            return await message.reply_text("🗑️ File database se delete kar di gayi hai.")
-        return await message.reply_text("⚠️ File database me nahi mili.")
-
-    if len(message.command) > 1:
-        name_query = message.text.split(None, 1)[1].strip()
-        count = await db.delete_files_by_name(name_query)
-        return await message.reply_text(f"🗑️ `{name_query}` ki **{count} files** delete kar di gayi hain.")
-
-    await message.reply_text("⚠️ Usage: File ko reply karke `/delete` ya `/delete Movie_Name` likhein.")
-
-@bot.on_message(filters.command(["deletefiles", "deleteall", "delall"]))
-async def delete_files_cmd(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
-
-    if len(message.command) < 2:
-        return await message.reply_text("⚠️ Movie ka naam likhein: `/deletefiles Movie_Name`")
-
-    movie_name = message.text.split(None, 1)[1].strip()
-    status_msg = await message.reply_text(f"🔍 `{movie_name}` ki files delete ho rahi hain...")
-    deleted_count = await db.delete_files_by_name(movie_name)
-    await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
+        if member.id == client.me.id:
+            welcome_text = ui.get_group_welcome_text(message.chat.title)
+            welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
+            await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
 # --- START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
@@ -401,129 +461,10 @@ async def filter_search(client: Client, message: Message):
 # --- CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
-    global INDEX_RUNNING, CURRENT_SKIP
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    # 1. Close Index Prompt
-    if data.startswith("idx_close_"):
-        await query.message.delete()
-        return await query.answer("❌ Indexing Cancelled.")
-
-    # 2. Start Indexing on "Yes"
-    elif data.startswith("idx_start_"):
-        job_id = data.replace("idx_start_", "")
-        job = INDEX_DATA.get(job_id)
-        if not job:
-            return await query.answer("⚠️ Session Expired! Forward again.", show_alert=True)
-
-        chat_target = job["chat_id"]
-        last_id = job["last_id"]
-        start_id = CURRENT_SKIP if CURRENT_SKIP > 0 else 1
-
-        try:
-            chat = await client.get_chat(chat_target)
-        except Exception as e:
-            return await query.answer(f"❌ Error: {e}", show_alert=True)
-
-        INDEX_RUNNING = True
-        await query.answer()
-
-        status_msg = await query.message.edit_text(
-            f"🚀 **Indexing Started:** `{chat.title}`\n\n"
-            f"🔘 **Starting From Msg ID:** `{start_id}`\n"
-            f"⏳ Processing files..."
-        )
-
-        total_scanned = 0
-        added_files = 0
-        skipped_files = 0
-        current_msg_id = start_id
-
-        try:
-            # Batch message fetch (Safe from keyword errors & 100x faster)
-            max_limit = last_id if last_id > 0 else (start_id + 50000)
-            
-            while current_msg_id <= max_limit and INDEX_RUNNING:
-                batch_ids = list(range(current_msg_id, min(current_msg_id + 100, max_limit + 1)))
-                try:
-                    messages = await client.get_messages(chat.id, batch_ids)
-                except FloodWait as e:
-                    await asyncio.sleep(e.value)
-                    continue
-                except Exception:
-                    break
-
-                if not messages:
-                    break
-
-                for msg in messages:
-                    if not INDEX_RUNNING:
-                        break
-                    if not msg or msg.empty:
-                        continue
-
-                    media = msg.document or msg.video or msg.audio
-                    if media:
-                        total_scanned += 1
-                        file_name = getattr(media, "file_name", None) or msg.caption or "Unknown"
-
-                        is_saved = await db.save_file(
-                            file_id=media.file_id,
-                            file_name=file_name,
-                            file_size=media.file_size,
-                            caption=msg.caption or ""
-                        )
-
-                        if is_saved:
-                            added_files += 1
-                        else:
-                            skipped_files += 1
-
-                current_msg_id = batch_ids[-1] + 1
-                CURRENT_SKIP = current_msg_id
-
-                if total_scanned > 0 and total_scanned % 20 == 0:
-                    try:
-                        await status_msg.edit_text(
-                            f"📊 **Indexing In Progress...**\n\n"
-                            f"📢 **Channel:** `{chat.title}`\n"
-                            f"🔢 **Current Msg ID:** `{current_msg_id}`\n\n"
-                            f"✅ **Added Files:** `{added_files}`\n"
-                            f"⏭️ **Skipped (Old):** `{skipped_files}`\n"
-                            f"📁 **Total Scanned:** `{total_scanned}`\n\n"
-                            f"🛑 *Stop karne ke liye `/cancel` likhein.*"
-                        )
-                    except Exception:
-                        pass
-                    await asyncio.sleep(0.3)
-
-            if INDEX_RUNNING:
-                await status_msg.edit_text(
-                    f"🎉 **Indexing Completed!**\n\n"
-                    f"📢 **Channel:** `{chat.title}`\n"
-                    f"✅ **Total Added:** `{added_files}`\n"
-                    f"⏭️ **Total Skipped:** `{skipped_files}`\n"
-                    f"📁 **Total Scanned:** `{total_scanned}`\n"
-                    f"🔢 **Last Message ID:** `{current_msg_id}`"
-                )
-
-        except Exception as e:
-            await query.message.reply_text(f"⚠️ **Error Occurred:** `{e}`\n\n💡 Resume: `/setskip {current_msg_id}` fir `/index`")
-        finally:
-            INDEX_RUNNING = False
-        return
-
-    # Guide text callback
-    elif data == "btn_search_guide":
-        await query.answer()
-        guide_text = ui.get_search_guide_text()
-        guide_msg = await query.message.reply_text(text=guide_text)
-        asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
-        return
-
-    # Pagination buttons
-    elif data.startswith("page_"):
+    if data.startswith("page_"):
         try:
             _, query_id, page_str = data.split("_")
             page = int(page_str)
