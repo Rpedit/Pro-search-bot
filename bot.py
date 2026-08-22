@@ -12,6 +12,7 @@ from pyrogram.errors import UserNotParticipant, MessageNotModified
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
+import indexer  # <-- Index module connect ho gaya
 
 bot = Client(
     "AutoFilterBot",
@@ -253,7 +254,7 @@ async def auto_index(client: Client, message: Message):
     print(f"[INDEXED]: {file_name}", flush=True)
 
 # --- SEARCH HANDLER (BOX / QUOTE REPLY) ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall"]))
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "index", "setskip", "cancel"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
