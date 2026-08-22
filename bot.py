@@ -115,7 +115,7 @@ async def group_welcome_handler(client: Client, message: Message):
             )
         # Case 2: Koi doosra user ya bot add hua hai
         else:
-            welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
+            welcome_user_text = ui.get_user_welcome_text(member.first_name, member.id, message.chat.title)
             await message.reply_text(
                 text=welcome_user_text,
                 reply_to_message_id=message.id
