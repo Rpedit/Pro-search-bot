@@ -1,3 +1,7 @@
+# =========================================================
+# FILE NAME: template.py
+# =========================================================
+
 # --- IMPORTS & LIBRARIES ---
 import math   # Mathematical calculations ke liye (e.g., file sizes/pagination)
 import re     # Regular expressions: filename se dots (.) aur underscores (_) hatane ke liye
@@ -26,16 +30,21 @@ def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
-# Jab koi naya member group join karta hai tab welcome text
+# Jab koi naya user ya bot group join karta hai tab welcome text
 def get_user_welcome_text(user_first_name: str, group_title: str) -> str:
-    return f"Hey ❤️ **{user_first_name}** 🍿 , Welcome to **{group_title}**.../"
+    return (
+        f"**Hey ❤️ {user_first_name} ,**\n"
+        f"**Welcome to {group_title}.../**"
+    )
 
 # Jab bot ko kisi naye group me add kiya jata hai tab admin mangne ka text
 def get_group_welcome_text(group_title: str) -> str:
     return (
-        f"**Thankyou For Adding Me In {group_title}** ❣️\n\n"
-        "›› **Don't Forget Make Admin** 🙃\n"
-        "›› **Is Any Doubts About Using Me Click Below Button..**⚡️⚡️."
+        f"**Thankyou For Adding Me In**\n"
+        f"**{group_title} ❣️**\n\n"
+        "›› Don't Forget Make Admin 🙃\n"
+        "›› Is Any Doubts About Using\n"
+        "Me Click Below Button..⚡️⚡️."
     )
 
 # Group me add hone ke baad aane wale Help/Tutorial buttons
