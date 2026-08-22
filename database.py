@@ -117,9 +117,19 @@ async def count_files(query: str) -> int:
     return count1 + count2
 
 # --- DELETE OPERATIONS ---
-async def delete_single_file(file_id: str):
-    del1 = await files_col1.delete_one({"file_id": file_id})
-    del2 = await files_col2.delete_one({"file_id": file_id}) if files_col2 is not None else None
+async def delete_single_file(file_id: str = None, file_name: str = None):
+    query = {}
+    if file_id:
+        query["file_id"] = file_id
+    elif file_name:
+        words = file_name.strip().split()
+        pattern = ".*".join([re.escape(w) for w in words])
+        query["file_name"] = re.compile(pattern, re.IGNORECASE)
+    else:
+        return 0
+
+    del1 = await files_col1.delete_one(query)
+    del2 = await files_col2.delete_one(query) if files_col2 is not None else None
     return del1.deleted_count or (del2.deleted_count if del2 else 0)
 
 async def delete_files_by_name(query: str):
