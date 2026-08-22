@@ -103,24 +103,24 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Exact Button Name Format: 903.56 MB • Mad Concrete Dreams S01E12 108...
+# Exact Button Format: 903.56 MB • Mad Concrete Dreams S01E12 108...
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
     clean_title = file_name.replace("_", " ").replace(".", " ")
     return f"{size_str} • {clean_title}"
 
-# Exact Screenshot Caption Format
+# Exact Caption Format matching Screenshot 1 & 2
 def get_search_caption(first_name: str, user_id: int, query: str) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
-        f"Hey __{user_mention}__ 🖐🏻\n\n"
+        f"Hey __{user_mention}__ 👋🏻\n\n"
         "⭕️Rotate your 🔄 phone to see files'\n"
         "full name...........................................⭕️\n\n"
         f"***Title : {query}***\n"
         "***Your Files is Ready Now***"
     )
 
-# File Caption matching 1 minute warning
+# Exact File Caption matching 1 minute warning
 def get_file_caption(raw_file_name: str) -> str:
     clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
     return (
@@ -146,7 +146,7 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Header Button: 🎬 Title 🎬
+    # Header Button: 🎬 Mad Concrete Dreams 🎬
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
     # Matching File Buttons
@@ -161,19 +161,19 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
     else:
-        # Pehle page par "■ Pages", aage ke page par "◀️ Previous"
+        # Page 1 par "■ Pages", Page 2+ par exact "⏪ Previous"
         if page > 1:
-            bottom_row.append(InlineKeyboardButton("◀️ Previous", callback_data=f"page_{query_id}_{page-1}"))
+            bottom_row.append(InlineKeyboardButton("⏪ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
             bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         
-        # Middle Page Counter (e.g. "1/2" on page 1 or "2 / 2" on page 2)
+        # Middle Page Counter: Page 1 par "1/2", Page 2 par "2 / 2"
         if page == 1:
             bottom_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="pages_click"))
         else:
             bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
         
-        # Last page par Next gayab ho jayega (Screenshot 2 jaisa)
+        # Next Button (Only on Page 1 / Before last page): "Next ⏩"
         if page < total_pages:
             bottom_row.append(InlineKeyboardButton("Next ⏩", callback_data=f"page_{query_id}_{page+1}"))
             
