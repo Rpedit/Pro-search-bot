@@ -104,13 +104,22 @@ async def broadcast_router(client: Client, message: Message):
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
-        welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
-        await message.reply_text(text=welcome_user_text, reply_to_message_id=message.id)
-
+        # Case 1: Bot khud add hua hai
         if member.id == client.me.id:
             welcome_text = ui.get_group_welcome_text(message.chat.title)
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
-            await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
+            await message.reply_text(
+                text=welcome_text,
+                reply_markup=welcome_buttons,
+                reply_to_message_id=message.id
+            )
+        # Case 2: Koi doosra user ya bot add hua hai
+        else:
+            welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
+            await message.reply_text(
+                text=welcome_user_text,
+                reply_to_message_id=message.id
+            )
 
 # --- 4. ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
