@@ -14,10 +14,22 @@ def get_start_text(first_name: str) -> str:
 def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
     buttons = [
-        [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", switch_inline_query_current_chat="")],
+        [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", callback_data="btn_search_guide")],
         [InlineKeyboardButton("📩 SHARE Now 📩", url=share_url)]
     ]
     return InlineKeyboardMarkup(buttons)
+
+def get_search_guide_text() -> str:
+    return (
+        "📨 **SEND MOVIE OR SERIES NAME AND YEAR AS PER GOOGLE SPELLING..!!** 👍\n\n"
+        "⚠️ **EXAMPLE FOR MOVIE** 👇\n\n"
+        "👉 **Jailer**\n"
+        "👉 **Jailer 2023**\n\n"
+        "⚠️ **EXAMPLE FOR WEBSERIES** 👇\n\n"
+        "👉 **Stranger Things**\n"
+        "👉 **Stranger Things S02 E04**\n\n"
+        "⚠️ **DON'T ADD EMOJIS AND SYMBOLS IN MOVIE NAME, USE LETTERS ONLY..!!** ❌"
+    )
 
 def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = [
@@ -49,7 +61,6 @@ def get_search_caption(first_name: str, query: str) -> str:
     )
 
 def get_file_caption(raw_file_name: str) -> str:
-    """Exact screenshot matching caption with warning emojis and clean title"""
     clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
     return (
         f"**{clean_name}**\n\n"
