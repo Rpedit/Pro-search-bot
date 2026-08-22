@@ -103,20 +103,20 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Proper Title Case formatting (e.g. 1.13 GB • Mad Concrete Dreams S01E01 1080p)
+# Proper Title Case formatting
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
     clean_title = file_name.replace("_", " ").replace(".", " ")
     
-    # Title Case conversion (words ko capital banata hai)
+    # Title Case conversion
     clean_title = " ".join([w.capitalize() if not re.match(r"^(1080p|720p|480p|2160p|4k|mkv|mp4|esub|hin|kor|eng|dual)$", w, re.I) else w.upper() for w in clean_title.split()])
     
-    # Season & Episode formatting (e.g. S01e01 -> S01E01)
+    # Season & Episode formatting (e.g. S01E01)
     clean_title = re.sub(r'(?i)\b(s\d{1,2})(e\d{1,2})\b', lambda m: f"{m.group(1).upper()}{m.group(2).upper()}", clean_title)
     
     return f"{size_str} • {clean_title}"
 
-# Exact Caption Format matching Screenshot 2
+# Caption Format matching Screenshot 2
 def get_search_caption(first_name: str, user_id: int, query: str) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -137,7 +137,7 @@ def get_file_caption(raw_file_name: str) -> str:
         "**forward in another chat👉❌**"
     )
 
-# Auto delete alert text matching Screenshot 2 top alert
+# Auto delete alert text
 def get_deleted_alert_text(first_name: str, user_id: int) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -164,16 +164,16 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Bottom Navigation Row matching Screenshot 2
+    # Bottom Navigation Row matching Screenshot 2 (Exact White Square Emoji ◽)
     bottom_row = []
     if total_pages <= 1:
-        bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
+        bottom_row.append(InlineKeyboardButton("◽ Pages", callback_data="pages_click"))
         bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
     else:
         if page > 1:
             bottom_row.append(InlineKeyboardButton("⏪ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
-            bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
+            bottom_row.append(InlineKeyboardButton("◽ Pages", callback_data="pages_click"))
         
         if page == 1:
             bottom_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="pages_click"))
