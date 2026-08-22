@@ -64,7 +64,15 @@ def get_file_caption(raw_file_name: str) -> str:
     clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
     return (
         f"**{clean_name}**\n\n"
-        "⚠️❌👉This file automatically ❗ delete after 1 minute ❗ so please forward in another chat👉❌"
+        "⚠️❌👉This file automatically ❗ delete after 4 minutes ❗ so please forward in another chat👉❌"
+    )
+
+def get_deleted_alert_text(first_name: str) -> str:
+    return (
+        f"Hey __{first_name}__,\n\n"
+        "**Your Request Has Been Deleted👍🏻**\n"
+        "*(Due To Avoid Copyrights Issue😌)*\n\n"
+        "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
     )
 
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
