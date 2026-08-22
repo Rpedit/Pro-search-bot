@@ -19,6 +19,11 @@ def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
+# --- USER ADDED WELCOME BOX REPLY ---
+def get_user_welcome_text(user_first_name: str, group_title: str) -> str:
+    return f"Hey ❤️ **{user_first_name}** 🍿 , Welcome to **{group_title}**.../"
+
+# --- BOT ADDED THANKYOU BOX REPLY ---
 def get_group_welcome_text(group_title: str) -> str:
     return (
         f"**Thankyou For Adding Me In {group_title}** ❣️\n\n"
