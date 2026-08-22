@@ -1,8 +1,11 @@
-# --- LIBRARIES & MODULES IMPORT ---
-import re         # Text cleaning aur link format match karne ke liye regex
-import math       # Pagination pages calculate karne ke liye (math.ceil)
-import secrets    # Unique random query ID generate karne ke liye (cache tracking)
-import asyncio    # Asynchronous delays aur background timers chalane ke liye
+# =========================================================
+# FILE: bot.py (FINAL UPDATED WITH YES/NO & LOADING)
+# =========================================================
+
+import re
+import math
+import secrets
+import asyncio
 from pyrogram import Client, filters, idle
 from pyrogram.types import (
     InlineKeyboardMarkup, 
@@ -12,12 +15,11 @@ from pyrogram.types import (
 )
 from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
 
-# Config, Database aur UI Template files ko import kiya gaya hai
+# Config, Database aur UI Template imports
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
 
-# Telegram Client instance setup
 bot = Client(
     "AutoFilterBot",
     api_id=API_ID,
@@ -26,17 +28,13 @@ bot = Client(
     in_memory=True
 )
 
-# Search sessions ko temporary memory me rakhne ke liye cache dictionary
 SEARCH_CACHE = {}
+PENDING_FORWARDS = {}  # Forwarded files confirmation memory
 
-# Admin check function: verify karta hai ki message bhejne wala admin list me hai ya nahi
 def is_admin(user_id: int) -> bool:
     return user_id in ADMINS
 
-
-# --- AUTO DELETE HELPER FUNCTIONS ---
-
-# Background timer: 'delay' seconds baad message ko chupchap delete karta hai
+# --- AUTO DELETE HELPERS ---
 async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
     """Delete any message safely without warning"""
     await asyncio.sleep(delay)
@@ -45,7 +43,6 @@ async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: 
     except Exception:
         pass
 
-# File result message ko delete karke user ko warning alert message bhejta hai
 async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, first_name: str, user_id: int, delay: int):
     """Wait -> Delete Message -> Send Standalone Warning Alert -> Delete Alert Later"""
     await asyncio.sleep(delay)
@@ -57,15 +54,11 @@ async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, fi
             text=alert_text,
             disable_web_page_preview=True
         )
-        # Alert message ko bhi 10 min baad delete kar deta hai
         asyncio.create_task(auto_delete_msg(client, chat_id, alert_msg.id, delay=600))
     except Exception as e:
         print(f"[AutoDelete Warn Error]: {e}", flush=True)
 
-
 # --- FORCE SUBSCRIBE (FSUB) HELPERS ---
-
-# FSUB channel ka invite link fetch karne ke liye
 async def get_fsub_link(client: Client):
     if isinstance(FSUB_CHANNEL, int):
         try:
@@ -75,7 +68,6 @@ async def get_fsub_link(client: Client):
             return "https://t.me"
     return f"https://t.me/{FSUB_CHANNEL}"
 
-# Check karta hai user ne FSUB channel join kiya hai ya nahi
 async def is_subscribed(client: Client, user_id: int):
     if not FSUB_CHANNEL:
         return True
@@ -87,9 +79,7 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-
-# --- 1. BOT & DATABASE STATS COMMAND ---
-# Database me total files, total users aur storage type check karne ke liye
+# --- 1. STATS COMMAND ---
 @bot.on_message(filters.command(["stats", "status"]) & filters.private)
 async def stats_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -105,9 +95,7 @@ async def stats_handler(client: Client, message: Message):
     )
     await message.reply_text(text)
 
-
-# --- 2. BATCH / RANGE INDEXER COMMAND ---
-# Private channel links se range me files index/save karne ke liye (e.g. /index t.me/c/123/1-100)
+# --- 2. BATCH/RANGE INDEXER (WITH DYNAMIC LOADING PROGRESS BAR) ---
 @bot.on_message(filters.command("index") & filters.private)
 async def batch_index_url(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -122,8 +110,6 @@ async def batch_index_url(client: Client, message: Message):
         )
 
     link = message.command[1].strip()
-    
-    # Link se Channel ID aur Message Range parse karta hai
     match = re.match(r"(?:https?://)?(?:www\.)?t\.me/c/(\d+)/(\d+)(?:-(\d+))?", link)
     if not match:
         return await message.reply_text("❌ Galat private channel link format! Example: `https://t.me/c/123456789/10-50`")
@@ -136,13 +122,13 @@ async def batch_index_url(client: Client, message: Message):
         start_id, end_id = end_id, start_id
 
     total_msgs = (end_id - start_id) + 1
-    status_msg = await message.reply_text(f"⏳ **Indexing start ho rahi hai...**\nTotal Messages: `{total_msgs}`")
+    status_msg = await message.reply_text("⏳ **Initializing Indexing Engine...**")
 
     indexed_count = 0
     skipped_count = 0
 
-    # Ek-ek message fetch karke database me save karne ka loop
     for current_id in range(start_id, end_id + 1):
+        processed = current_id - start_id + 1
         try:
             msg = await client.get_messages(chat_id=channel_id, message_ids=current_id)
             if msg and (msg.document or msg.video or msg.audio):
@@ -161,13 +147,17 @@ async def batch_index_url(client: Client, message: Message):
             else:
                 skipped_count += 1
 
-            # Har 20 messages ke baad progress update karta hai
-            if (current_id - start_id + 1) % 20 == 0:
+            if processed % 10 == 0 or processed == total_msgs:
+                percent = int((processed / total_msgs) * 100)
+                filled = int(percent / 10)
+                bar = "🟩" * filled + "⬜" * (10 - filled)
+                
                 await status_msg.edit_text(
-                    f"⏳ **Indexing In Progress...**\n\n"
-                    f"Processed: `{current_id - start_id + 1}/{total_msgs}`\n"
-                    f"✅ Indexed: `{indexed_count}`\n"
-                    f"⏩ Skipped/Duplicate: `{skipped_count}`"
+                    f"⚡ **Indexing In Progress...**\n\n"
+                    f"[{bar}] **{percent}%**\n"
+                    f"📊 **Total Processed:** `{processed}/{total_msgs}`\n"
+                    f"✅ **Indexed:** `{indexed_count}`\n"
+                    f"⏩ **Skipped/Duplicate:** `{skipped_count}`"
                 )
         except FloodWait as e:
             await asyncio.sleep(e.value)
@@ -180,9 +170,7 @@ async def batch_index_url(client: Client, message: Message):
         f"⏩ **Skipped/Duplicate:** `{skipped_count}`"
     )
 
-
-# --- 3. FORWARD MEDIA INDEXER ---
-# Bot ko direct file forward karke DB me save karne ka feature
+# --- 3. FORWARDED MEDIA INDEXER (YES/NO CONFIRMATION BUTTONS) ---
 @bot.on_message(filters.private & filters.forwarded & (filters.document | filters.video | filters.audio))
 async def forward_index_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -190,35 +178,43 @@ async def forward_index_handler(client: Client, message: Message):
 
     media = message.document or message.video or message.audio
     file_name = getattr(media, "file_name", None) or message.caption or "Unknown"
-    saved = await db.save_file(
-        file_id=media.file_id,
-        file_name=file_name,
-        file_size=media.file_size,
-        caption=message.caption or ""
+    
+    task_id = secrets.token_hex(4)
+    PENDING_FORWARDS[task_id] = {
+        "file_id": media.file_id,
+        "file_name": file_name,
+        "file_size": media.file_size,
+        "caption": message.caption or ""
+    }
+
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Yes (Save)", callback_data=f"save_fwd_{task_id}"),
+            InlineKeyboardButton("❌ No (Cancel)", callback_data=f"cancel_fwd_{task_id}")
+        ]
+    ])
+
+    await message.reply_text(
+        f"📁 **File Name:** `{file_name}`\n"
+        f"📦 **Size:** `{ui.humanbytes(media.file_size)}`\n\n"
+        "❓ **Kya aap is file ko database me save karna chahte hain?**",
+        reply_markup=buttons,
+        reply_to_message_id=message.id
     )
-    if saved:
-        await message.reply_text(f"✅ **Saved in DB:**\n`{file_name}`")
-    else:
-        await message.reply_text(f"⚠️ **File already saved / duplicate:**\n`{file_name}`")
 
-
-# --- 4. GROUP WELCOME HANDLER ---
-# Naye user aur bot ke group join karne par welcome text bhejne ke liye
+# --- 4. GROUP WELCOME EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
         welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
         await message.reply_text(text=welcome_user_text, reply_to_message_id=message.id)
 
-        # Agar bot khud add hua hai to admin mangne wala message bhejega
         if member.id == client.me.id:
             welcome_text = ui.get_group_welcome_text(message.chat.title)
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
             await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
-
 # --- 5. ADMIN COMMANDS: BAN & UNBAN ---
-# User ko bot use karne se block ya unblock karne ke handlers
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
 async def ban_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -259,9 +255,7 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-
 # --- 6. ADMIN COMMANDS: FILE DELETION ---
-# Single file ya kisi movie ki saari files delete karne ke commands
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -304,9 +298,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
-
 # --- 7. START COMMAND & FILE DELIVERY ---
-# Bot start karna, FSUB check karna aur deep-link ke through direct file send karna
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -317,7 +309,6 @@ async def start_handler(client: Client, message: Message):
 
     await db.add_user(user_id)
 
-    # Force-sub check
     if not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         buttons = ui.get_fsub_buttons(invite_link, client.me.username)
@@ -335,7 +326,6 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Deep-link se file bhejna (e.g. /start file_12345)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -346,11 +336,9 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            # 4 minute (240 sec) baad file auto-delete
             asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=240))
             return
 
-    # Normal /start message
     caption_text = ui.get_start_text(first_name)
     markup = ui.get_start_buttons(client.me.username)
 
@@ -367,9 +355,7 @@ async def start_handler(client: Client, message: Message):
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-
 # --- 8. AUTO INDEX IN DB CHANNEL ---
-# Database channel me nayi file aate hi automatically database me store karna
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -384,9 +370,7 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-
 # --- 9. MOVIE SEARCH HANDLER ---
-# User jab koi movie/file ka naam group ya PM me type karta hai tab search perform karna
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status", "index"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -398,7 +382,6 @@ async def filter_search(client: Client, message: Message):
     if await db.is_user_banned(user_id):
         return await message.reply_text("⛔ **Aap ban hain, bot use nahi kar sakte.**")
 
-    # FSUB check (PM searches ke liye)
     if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         btn = [[InlineKeyboardButton("📢 Join Channel", url=invite_link)]]
@@ -411,7 +394,6 @@ async def filter_search(client: Client, message: Message):
     query = message.text.strip()
     total_results = await db.count_files(query)
 
-    # Agar koi file na mile
     if total_results == 0:
         no_res_msg = await message.reply_text(
             text=ui.get_no_results_text(),
@@ -435,18 +417,14 @@ async def filter_search(client: Client, message: Message):
         reply_to_message_id=message.id
     )
 
-    # 4.5 min (270 sec) baad search result delete karke warning bhejna
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
-
-# --- 10. CALLBACK ROUTER (BUTTON CLICKS) ---
-# Next/Prev page buttons aur Search Guide popups handle karna
+# --- 10. CALLBACK ROUTER (WITH LOADING & CONFIRMATION STATES) ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    # Search Guide button click
     if data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
@@ -454,7 +432,37 @@ async def callback_router(client: Client, query: CallbackQuery):
         asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
         return
 
-    # Pagination navigation (page_queryid_pagenumber)
+    # Forward Yes Click -> Loading Effect -> Database Save
+    elif data.startswith("save_fwd_"):
+        task_id = data.replace("save_fwd_", "")
+        file_info = PENDING_FORWARDS.pop(task_id, None)
+
+        if not file_info:
+            return await query.answer("⚠️ Session Expired!", show_alert=True)
+
+        await query.message.edit_text("⏳ **Database me save ho raha hai... Please wait...**")
+
+        saved = await db.save_file(
+            file_id=file_info["file_id"],
+            file_name=file_info["file_name"],
+            file_size=file_info["file_size"],
+            caption=file_info["caption"]
+        )
+
+        if saved:
+            await query.message.edit_text(f"✅ **Database me successfully save ho gaya!**\n\n📁 `{file_info['file_name']}`")
+        else:
+            await query.message.edit_text(f"⚠️ **Duplicate! File already saved hai:**\n\n📁 `{file_info['file_name']}`")
+        await query.answer()
+
+    # Forward No Click -> Cancel
+    elif data.startswith("cancel_fwd_"):
+        task_id = data.replace("cancel_fwd_", "")
+        PENDING_FORWARDS.pop(task_id, None)
+        await query.message.edit_text("❌ **File indexing cancel kar di gayi.**")
+        await query.answer("Cancelled!")
+
+    # Pagination navigation
     elif data.startswith("page_"):
         try:
             _, query_id, page_str = data.split("_")
@@ -480,14 +488,11 @@ async def callback_router(client: Client, query: CallbackQuery):
         finally:
             await query.answer()
 
-    # Inactive clicks (e.g. Title header ya Current Page count)
     elif data in ["pages_click", "header_click"]:
         await query.answer()
 
-
-# --- BOT STARTUP & LIFECYCLE ---
+# --- MAIN RUNNER ---
 async def main():
-    # Database table initialize karna
     await db.init_db()
     await bot.start()
     print(">>> BOT IS ONLINE (CONNECTED TO TURSO DB) <<<", flush=True)
