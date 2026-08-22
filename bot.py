@@ -243,7 +243,7 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            # Auto delete file after exactly 60 seconds (1 minute) as per caption
+            # Auto delete file after exactly 60 seconds (1 minute)
             asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
             return
 
@@ -325,6 +325,7 @@ async def filter_search(client: Client, message: Message):
         reply_to_message_id=message.id
     )
 
+    # Search results auto-delete after 270s (4.5 minutes) and trigger warning alert
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
 # --- 9. CALLBACK ROUTER ---
