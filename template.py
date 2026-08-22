@@ -31,6 +31,16 @@ def get_search_guide_text() -> str:
         "⚠️ **DON'T ADD EMOJIS AND SYMBOLS IN MOVIE NAME, USE LETTERS ONLY..!!** ❌"
     )
 
+def get_no_results_text() -> str:
+    return (
+        "●**I could not find the file you requested** 😕\n\n"
+        "● **Is the movie you asked about released OTT..?**\n\n"
+        "● __Pay attention to the following...__\n\n"
+        "● **Ask for correct spelling.**\n\n"
+        "● **Do not ask for movies that are not released on OTT platforms.**\n\n"
+        "● **Also ask [movie name, language] like this...**"
+    )
+
 def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
@@ -78,16 +88,16 @@ def get_deleted_alert_text(first_name: str) -> str:
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # 1. Header Button showing Title
+    # Header Button showing Title
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # 2. File list buttons as Deep-link URLs
+    # File list buttons as Deep-link URLs
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # 3. Bottom Pagination Buttons
+    # Pagination Navigation
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
