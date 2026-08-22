@@ -8,7 +8,7 @@ from pyrogram.types import (
     Message, 
     CallbackQuery
 )
-from pyrogram.errors import UserNotParticipant, MessageNotModified
+from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
@@ -22,6 +22,7 @@ bot = Client(
 )
 
 SEARCH_CACHE = {}
+INDEX_DATA = {}
 CURRENT_SKIP = 0
 INDEX_RUNNING = False
 
@@ -30,7 +31,6 @@ def is_admin(user_id: int) -> bool:
 
 # --- GENERAL AUTO DELETE HELPER ---
 async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
-    """Delete any message safely without warning"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
@@ -39,7 +39,6 @@ async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: 
 
 # --- DELETE TARGET & SEND WARNING ALERT ---
 async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, first_name: str, user_id: int, delay: int):
-    """Wait -> Delete Message -> Send Standalone Warning Alert -> Delete Alert Later"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
@@ -73,8 +72,8 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- 1. STATS COMMAND ---
-@bot.on_message(filters.command("stats") & filters.private)
+# --- 1. STATS / STATUS COMMAND ---
+@bot.on_message(filters.command(["stats", "status"]) & filters.private)
 async def stats_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
         return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
@@ -106,7 +105,7 @@ async def set_skip_handler(client: Client, message: Message):
     try:
         CURRENT_SKIP = int(message.command[1])
         await message.reply_text(
-            f"✅ **Skip Count Set:** `{CURRENT_SKIP}`\nAb `/index` Msg ID `{CURRENT_SKIP}` se aage start hoga."
+            f"✅ **Skip Count Set:** `{CURRENT_SKIP}`\nAb Indexing Msg ID `{CURRENT_SKIP}` se start hogi."
         )
     except ValueError:
         await message.reply_text("⚠️ Sahi numeric number enter karein.")
@@ -124,10 +123,10 @@ async def cancel_index_handler(client: Client, message: Message):
     INDEX_RUNNING = False
     await message.reply_text("🛑 **Stopping Indexing...** Process cancel kiya ja raha hai.")
 
-# --- 4. INDEX COMMAND (FORWARD REPLY & CHANNEL TARGET) ---
+# --- 4. INDEX CONFIRMATION / PROMPT (SCREENSHOT UI) ---
 @bot.on_message(filters.command("index") & filters.private)
-async def bulk_index_handler(client: Client, message: Message):
-    global CURRENT_SKIP, INDEX_RUNNING
+async def index_prompt_handler(client: Client, message: Message):
+    global CURRENT_SKIP
     if not is_admin(message.from_user.id):
         return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
 
@@ -135,9 +134,8 @@ async def bulk_index_handler(client: Client, message: Message):
         return await message.reply_text("⚠️ Indexing pehle se chal rahi hai! Rokne ke liye `/cancel` likhein.")
 
     chat_target = None
-    start_skip = CURRENT_SKIP
+    last_msg_id = 0
 
-    # Reply to Forwarded Message Check
     if message.reply_to_message:
         reply = message.reply_to_message
         fwd_chat = getattr(reply, "forward_from_chat", None) or getattr(reply, "sender_chat", None)
@@ -146,8 +144,7 @@ async def bulk_index_handler(client: Client, message: Message):
             return await message.reply_text("⚠️ Jis message ko reply kiya hai, wo channel se forwarded message hona chahiye!")
 
         chat_target = fwd_chat.id
-        start_skip = reply.forward_from_message_id or 0
-        CURRENT_SKIP = start_skip
+        last_msg_id = reply.forward_from_message_id or reply.id
 
     elif len(message.command) > 1:
         raw_target = message.command[1].strip()
@@ -155,106 +152,53 @@ async def bulk_index_handler(client: Client, message: Message):
             chat_target = int(raw_target)
         except ValueError:
             chat_target = raw_target
+        try:
+            chat = await client.get_chat(chat_target)
+            chat_target = chat.id
+            last_msg_id = 0
+        except Exception as e:
+            return await message.reply_text(f"❌ Error: `{e}`")
     else:
         return await message.reply_text(
             "⚠️ **Index Kaise Karein:**\n\n"
-            "1. Channel se message forward karke reply karein: `/index`\n"
+            "1. Channel se koi bhi latest message forward karein aur reply me likhein: `/index`\n"
             "2. Direct channel likhein: `/index @channel_username`"
         )
 
-    try:
-        chat = await client.get_chat(chat_target)
-    except Exception as e:
-        return await message.reply_text(
-            f"❌ **Channel Access Error:** `{e}`\n\n💡 *Check karein bot channel me Admin hai ya nahi.*"
-        )
+    # Cache index job details
+    job_id = secrets.token_hex(4)
+    INDEX_DATA[job_id] = {
+        "chat_id": chat_target,
+        "last_id": last_msg_id
+    }
 
-    INDEX_RUNNING = True
-    status_msg = await message.reply_text(
-        f"🚀 **Indexing Started:** `{chat.title}`\n\n"
-        f"🔘 **Starting From Msg ID:** `{start_skip}`\n"
-        f"⏳ Processing files..."
+    # Screenshot Exact Text & Buttons UI
+    confirm_text = (
+        "Do you Want To Index This Channel/\n"
+        "Group ?\n\n"
+        f"Chat ID/ Username: {chat_target}\n"
+        f"Last Message ID: {last_msg_id if last_msg_id else 'Fetch All'}\n\n"
+        "**NEED SETSKIP 👉** /setskip"
     )
 
-    total_files = 0
-    added_files = 0
-    skipped_files = 0
-    current_msg_id = start_skip
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Yes", callback_data=f"idx_start_{job_id}")],
+        [InlineKeyboardButton("Close", callback_data=f"idx_close_{job_id}")]
+    ])
 
-    try:
-        async for msg in client.get_chat_history(chat.id, offset_id=start_skip, reverse=True):
-            if not INDEX_RUNNING:
-                await message.reply_text(f"🛑 **Indexing Stopped!**\n\n📌 Resume Point: `/setskip {current_msg_id}`")
-                break
-
-            current_msg_id = msg.id
-            CURRENT_SKIP = msg.id
-
-            media = msg.document or msg.video or msg.audio
-            if media:
-                total_files += 1
-                file_name = getattr(media, "file_name", None) or msg.caption or "Unknown"
-
-                is_saved = await db.save_file(
-                    file_id=media.file_id,
-                    file_name=file_name,
-                    file_size=media.file_size,
-                    caption=msg.caption or ""
-                )
-
-                if is_saved:
-                    added_files += 1
-                else:
-                    skipped_files += 1
-
-                if total_files % 15 == 0:
-                    try:
-                        await status_msg.edit_text(
-                            f"📊 **Indexing In Progress...**\n\n"
-                            f"📢 **Channel:** `{chat.title}`\n"
-                            f"🔢 **Current Msg ID:** `{current_msg_id}`\n\n"
-                            f"✅ **Added Files:** `{added_files}`\n"
-                            f"⏭️ **Skipped (Old):** `{skipped_files}`\n"
-                            f"📁 **Total Scanned:** `{total_files}`\n\n"
-                            f"🛑 *Stop karne ke liye `/cancel` likhein.*"
-                        )
-                    except Exception:
-                        pass
-                    await asyncio.sleep(0.3)
-
-        if INDEX_RUNNING:
-            await status_msg.edit_text(
-                f"🎉 **Indexing Completed!**\n\n"
-                f"📢 **Channel:** `{chat.title}`\n"
-                f"✅ **Total Added:** `{added_files}`\n"
-                f"⏭️ **Total Skipped:** `{skipped_files}`\n"
-                f"📁 **Total Scanned:** `{total_files}`\n"
-                f"🔢 **Last Message ID:** `{current_msg_id}`"
-            )
-
-    except Exception as e:
-        await message.reply_text(f"⚠️ **Error Occurred:** `{e}`\n\n💡 Resume: `/setskip {current_msg_id}` fir `/index`")
-    finally:
-        INDEX_RUNNING = False
+    await message.reply_text(text=confirm_text, reply_markup=buttons, reply_to_message_id=message.id)
 
 # --- SCREENSHOT REPLIES: GROUP WELCOME & ADDED EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
         welcome_user_text = ui.get_user_welcome_text(member.first_name, message.chat.title)
-        await message.reply_text(
-            text=welcome_user_text,
-            reply_to_message_id=message.id
-        )
+        await message.reply_text(text=welcome_user_text, reply_to_message_id=message.id)
 
         if member.id == client.me.id:
             welcome_text = ui.get_group_welcome_text(message.chat.title)
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
-            await message.reply_text(
-                text=welcome_text,
-                reply_markup=welcome_buttons,
-                reply_to_message_id=message.id
-            )
+            await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
 # --- ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
@@ -333,7 +277,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
-# --- START COMMAND (BOT PRIVATE CHAT) ---
+# --- START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -344,7 +288,6 @@ async def start_handler(client: Client, message: Message):
 
     await db.add_user(user_id)
 
-    # Force Subscribe Check
     if not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         buttons = ui.get_fsub_buttons(invite_link, client.me.username)
@@ -362,7 +305,6 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Group Deep Link File Delivery (4 min delete -> NO WARNING)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -407,8 +349,8 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER (BOX / QUOTE REPLY) ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "index", "setskip", "cancel", "stats"]))
+# --- SEARCH HANDLER ---
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "index", "setskip", "cancel", "stats", "status"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
@@ -431,7 +373,6 @@ async def filter_search(client: Client, message: Message):
     query = message.text.strip()
     total_results = await db.count_files(query)
 
-    # Not Found Message with Quote Box (5 minutes / 300s auto delete)
     if total_results == 0:
         no_res_msg = await message.reply_text(
             text=ui.get_no_results_text(),
@@ -460,16 +401,128 @@ async def filter_search(client: Client, message: Message):
 # --- CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
+    global INDEX_RUNNING, CURRENT_SKIP
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    if data == "btn_search_guide":
+    # 1. Close Index Prompt
+    if data.startswith("idx_close_"):
+        await query.message.delete()
+        return await query.answer("❌ Indexing Cancelled.")
+
+    # 2. Start Indexing on "Yes"
+    elif data.startswith("idx_start_"):
+        job_id = data.replace("idx_start_", "")
+        job = INDEX_DATA.get(job_id)
+        if not job:
+            return await query.answer("⚠️ Session Expired! Forward again.", show_alert=True)
+
+        chat_target = job["chat_id"]
+        last_id = job["last_id"]
+        start_id = CURRENT_SKIP if CURRENT_SKIP > 0 else 1
+
+        try:
+            chat = await client.get_chat(chat_target)
+        except Exception as e:
+            return await query.answer(f"❌ Error: {e}", show_alert=True)
+
+        INDEX_RUNNING = True
+        await query.answer()
+
+        status_msg = await query.message.edit_text(
+            f"🚀 **Indexing Started:** `{chat.title}`\n\n"
+            f"🔘 **Starting From Msg ID:** `{start_id}`\n"
+            f"⏳ Processing files..."
+        )
+
+        total_scanned = 0
+        added_files = 0
+        skipped_files = 0
+        current_msg_id = start_id
+
+        try:
+            # Batch message fetch (Safe from keyword errors & 100x faster)
+            max_limit = last_id if last_id > 0 else (start_id + 50000)
+            
+            while current_msg_id <= max_limit and INDEX_RUNNING:
+                batch_ids = list(range(current_msg_id, min(current_msg_id + 100, max_limit + 1)))
+                try:
+                    messages = await client.get_messages(chat.id, batch_ids)
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    continue
+                except Exception:
+                    break
+
+                if not messages:
+                    break
+
+                for msg in messages:
+                    if not INDEX_RUNNING:
+                        break
+                    if not msg or msg.empty:
+                        continue
+
+                    media = msg.document or msg.video or msg.audio
+                    if media:
+                        total_scanned += 1
+                        file_name = getattr(media, "file_name", None) or msg.caption or "Unknown"
+
+                        is_saved = await db.save_file(
+                            file_id=media.file_id,
+                            file_name=file_name,
+                            file_size=media.file_size,
+                            caption=msg.caption or ""
+                        )
+
+                        if is_saved:
+                            added_files += 1
+                        else:
+                            skipped_files += 1
+
+                current_msg_id = batch_ids[-1] + 1
+                CURRENT_SKIP = current_msg_id
+
+                if total_scanned > 0 and total_scanned % 20 == 0:
+                    try:
+                        await status_msg.edit_text(
+                            f"📊 **Indexing In Progress...**\n\n"
+                            f"📢 **Channel:** `{chat.title}`\n"
+                            f"🔢 **Current Msg ID:** `{current_msg_id}`\n\n"
+                            f"✅ **Added Files:** `{added_files}`\n"
+                            f"⏭️ **Skipped (Old):** `{skipped_files}`\n"
+                            f"📁 **Total Scanned:** `{total_scanned}`\n\n"
+                            f"🛑 *Stop karne ke liye `/cancel` likhein.*"
+                        )
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.3)
+
+            if INDEX_RUNNING:
+                await status_msg.edit_text(
+                    f"🎉 **Indexing Completed!**\n\n"
+                    f"📢 **Channel:** `{chat.title}`\n"
+                    f"✅ **Total Added:** `{added_files}`\n"
+                    f"⏭️ **Total Skipped:** `{skipped_files}`\n"
+                    f"📁 **Total Scanned:** `{total_scanned}`\n"
+                    f"🔢 **Last Message ID:** `{current_msg_id}`"
+                )
+
+        except Exception as e:
+            await query.message.reply_text(f"⚠️ **Error Occurred:** `{e}`\n\n💡 Resume: `/setskip {current_msg_id}` fir `/index`")
+        finally:
+            INDEX_RUNNING = False
+        return
+
+    # Guide text callback
+    elif data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
         guide_msg = await query.message.reply_text(text=guide_text)
         asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
         return
 
+    # Pagination buttons
     elif data.startswith("page_"):
         try:
             _, query_id, page_str = data.split("_")
