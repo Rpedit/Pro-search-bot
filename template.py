@@ -14,17 +14,15 @@ def get_start_text(first_name: str) -> str:
 def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
     buttons = [
-        # Click hone par message typing box scroll hokar active ho jayega
+        # switch_inline_query_current_chat click hone par seedha message bar ko niche focus karega
         [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("📩 SHARE Now 📩", url=share_url)]
     ]
     return InlineKeyboardMarkup(buttons)
 
-# --- USER ADDED WELCOME BOX REPLY ---
 def get_user_welcome_text(user_first_name: str, group_title: str) -> str:
     return f"Hey ❤️ **{user_first_name}** 🍿 , Welcome to **{group_title}**.../"
 
-# --- BOT ADDED THANKYOU BOX REPLY ---
 def get_group_welcome_text(group_title: str) -> str:
     return (
         f"**Thankyou For Adding Me In {group_title}** ❣️\n\n"
@@ -40,18 +38,6 @@ def get_group_welcome_buttons(bot_username: str) -> InlineKeyboardMarkup:
         ]
     ]
     return InlineKeyboardMarkup(buttons)
-
-def get_search_guide_text() -> str:
-    return (
-        "📨 **SEND MOVIE OR SERIES NAME AND YEAR AS PER GOOGLE SPELLING..!!** 👍\n\n"
-        "⚠️ **EXAMPLE FOR MOVIE** 👇\n\n"
-        "👉 **Jailer**\n"
-        "👉 **Jailer 2023**\n\n"
-        "⚠️ **EXAMPLE FOR WEBSERIES** 👇\n\n"
-        "👉 **Stranger Things**\n"
-        "👉 **Stranger Things S02 E04**\n\n"
-        "⚠️ **DON'T ADD EMOJIS AND SYMBOLS IN MOVIE NAME, USE LETTERS ONLY..!!** ❌"
-    )
 
 def get_no_results_text() -> str:
     return (
@@ -71,11 +57,9 @@ def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(buttons)
 
 def humanbytes(size: int) -> str:
-    if not size:
-        return "0 B"
+    if not size: return "0 B"
     for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if size < 1024.0:
-            break
+        if size < 1024.0: break
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
@@ -110,17 +94,12 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
 
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
-    
-    # Header Button showing Title
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
-    
-    # File list buttons as Deep-link URLs
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Pagination Navigation
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
