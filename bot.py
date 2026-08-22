@@ -25,7 +25,7 @@ SEARCH_CACHE = {}
 
 # --- GENERAL AUTO DELETE HELPER ---
 async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
-    """Delete any message after specified delay in seconds"""
+    """Delete any message safely after specified delay in seconds"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
@@ -41,7 +41,7 @@ async def auto_delete_file_handler(client: Client, chat_id: int, message_id: int
         alert_text = ui.get_deleted_alert_text(first_name)
         alert_msg = await client.send_message(chat_id=chat_id, text=alert_text)
         
-        # Warning message deletes after 10 minutes (600 seconds)
+        # Warning alert message deletes after 10 minutes (600 seconds)
         asyncio.create_task(auto_delete_msg(client, chat_id, alert_msg.id, delay=600))
     except Exception as e:
         print(f"[AutoDelete Error]: {e}", flush=True)
@@ -136,7 +136,7 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER (BUTTONS 4.5 MIN AUTO DELETE) ---
+# --- SEARCH HANDLER ---
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -152,13 +152,11 @@ async def filter_search(client: Client, message: Message):
     query = message.text.strip()
     total_results = await db.count_files(query)
 
+    # Not Found Message (Auto-deletes in 5 minutes / 300s)
     if total_results == 0:
-        return await message.reply_text(
-            f"❌ **No results found for:** `{query}`\n\n"
-            "💡 **Tips:**\n"
-            "• Google par spelling verify karein\n"
-            "• Year ya season hata kar search karein"
-        )
+        no_res_msg = await message.reply_text(text=ui.get_no_results_text())
+        asyncio.create_task(auto_delete_msg(client, user_id, no_res_msg.id, delay=300))
+        return
 
     query_id = secrets.token_hex(4)
     SEARCH_CACHE[query_id] = query
@@ -180,12 +178,12 @@ async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    # Search Guide Message Button (Auto-deletes in 5 min)
+    # Search Guide Message Button (Auto-deletes in 1 Day / 86400s)
     if data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
         guide_msg = await query.message.reply_text(text=guide_text)
-        asyncio.create_task(auto_delete_msg(client, query.from_user.id, guide_msg.id, delay=300))
+        asyncio.create_task(auto_delete_msg(client, query.from_user.id, guide_msg.id, delay=86400))
         return
 
     elif data.startswith("page_"):
