@@ -316,7 +316,8 @@ async def filter_search(client: Client, message: Message):
     total_pages = math.ceil(total_results / 10)
     files = await db.search_files(query, offset=0, limit=10)
 
-    caption_text = ui.get_search_caption(first_name, query)
+    # Caption with User ID for perfect green-italic mention styling
+    caption_text = ui.get_search_caption(first_name, user_id, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
     search_msg = await message.reply_text(
@@ -325,7 +326,6 @@ async def filter_search(client: Client, message: Message):
         reply_to_message_id=message.id
     )
 
-    # Search results auto-delete after 270s (4.5 minutes) and trigger warning alert
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
 # --- 9. CALLBACK ROUTER ---
@@ -333,8 +333,9 @@ async def filter_search(client: Client, message: Message):
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
+    user_id = query.from_user.id
 
-    # Broadcast confirmation aur mode selection callback
+    # Broadcast confirmation callback
     if data.startswith("bcast_"):
         await handle_broadcast_callback(client, query)
         return
@@ -361,7 +362,7 @@ async def callback_router(client: Client, query: CallbackQuery):
             offset = (page - 1) * 10
             files = await db.search_files(search_query, offset=offset, limit=10)
 
-            caption_text = ui.get_search_caption(first_name, search_query)
+            caption_text = ui.get_search_caption(first_name, user_id, search_query)
             keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query, client.me.username)
 
             await query.message.edit_text(text=caption_text, reply_markup=keyboard)
