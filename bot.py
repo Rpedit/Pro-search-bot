@@ -157,7 +157,13 @@ async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    if data.startswith("page_"):
+    # Search Guide Message Trigger
+    if data == "btn_search_guide":
+        await query.answer()
+        guide_text = ui.get_search_guide_text()
+        return await query.message.reply_text(text=guide_text)
+
+    elif data.startswith("page_"):
         try:
             _, query_id, page_str = data.split("_")
             page = int(page_str)
