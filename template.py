@@ -103,7 +103,7 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Proper Title Case formatting
+# Button Format matching Screenshot 2 (Title Case Clean Font)
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
     clean_title = file_name.replace("_", " ").replace(".", " ")
@@ -116,7 +116,7 @@ def format_btn_name(file_name: str, file_size: int) -> str:
     
     return f"{size_str} • {clean_title}"
 
-# Caption Format matching Screenshot 2
+# Caption Format matching Screenshot 2 (Curved Bold Italic Title & Ready)
 def get_search_caption(first_name: str, user_id: int, query: str) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -164,7 +164,7 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Bottom Navigation Row matching Screenshot 2 (Exact White Square Emoji ◽)
+    # Bottom Navigation Row matching Screenshot 2 (Exact Compact Square Emoji ◽)
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("◽ Pages", callback_data="pages_click"))
