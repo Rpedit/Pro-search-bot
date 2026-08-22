@@ -1,20 +1,17 @@
 import math
 import secrets
-import asyncio
 from pyrogram import Client, filters, idle
 from pyrogram.types import (
     InlineKeyboardMarkup, 
     InlineKeyboardButton, 
-    InlineQueryResultArticle, 
-    InputTextMessageContent,
     Message, 
-    CallbackQuery, 
-    InlineQuery
+    CallbackQuery
 )
 from pyrogram.errors import UserNotParticipant, MessageNotModified
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL
 import database as db
 import template as ui
+from auto_delete import start_auto_delete_task
 
 bot = Client(
     "AutoFilterBot",
@@ -25,13 +22,6 @@ bot = Client(
 )
 
 SEARCH_CACHE = {}
-
-async def auto_delete_file(client: Client, chat_id: int, message_id: int, delay: int = 60):
-    await asyncio.sleep(delay)
-    try:
-        await client.delete_messages(chat_id=chat_id, message_ids=message_id)
-    except Exception:
-        pass
 
 async def get_fsub_link(client: Client):
     if isinstance(FSUB_CHANNEL, int):
@@ -60,6 +50,7 @@ async def start_handler(client: Client, message: Message):
     first_name = message.from_user.first_name if message.from_user else "User"
     await db.add_user(user_id)
 
+    # Force Subscribe Check
     if not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         buttons = ui.get_fsub_buttons(invite_link, client.me.username)
@@ -75,7 +66,7 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons
             )
 
-    # Deep Link Handler
+    # Deep Link Handler (4-Minute Timer + Post Delete Notification Alert)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -86,7 +77,8 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            asyncio.create_task(auto_delete_file(client, user_id, sent_msg.id, delay=60))
+            # Start 4-Minute (240s) Auto Delete Task with notification
+            start_auto_delete_task(client, user_id, sent_msg.id, first_name=first_name, delay=240)
             return
 
     caption_text = ui.get_start_text(first_name)
@@ -157,7 +149,7 @@ async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
 
-    # Search Guide Message Trigger
+    # Search Guide Message Button
     if data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
