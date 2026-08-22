@@ -26,6 +26,24 @@ def get_active_files_col():
         return files_col2
     return files_col1
 
+# --- BOT & DATABASE STATS ---
+async def get_db_stats():
+    total_users = await users_col.count_documents({})
+    banned_users = await users_col.count_documents({"is_banned": True})
+    
+    db1_files = await files_col1.count_documents({})
+    db2_files = await files_col2.count_documents({}) if files_col2 is not None else 0
+    total_files = db1_files + db2_files
+
+    return {
+        "total_users": total_users,
+        "banned_users": banned_users,
+        "total_files": total_files,
+        "db1_files": db1_files,
+        "db2_files": db2_files,
+        "active_db": "Database 2" if (USE_SECOND_DB and files_col2 is not None) else "Database 1"
+    }
+
 # --- USER MANAGEMENT (BAN / UNBAN) ---
 async def add_user(user_id: int):
     await users_col.update_one({"user_id": user_id}, {"$set": {"user_id": user_id}}, upsert=True)
@@ -49,7 +67,12 @@ async def save_file(file_id: str, file_name: str, file_size: int, caption: str =
         "file_size": file_size,
         "caption": caption
     }
-    await col.update_one({"file_id": file_id}, {"$set": data}, upsert=True)
+    # Check if file already exists in active DB (Duplicate check)
+    existing = await col.find_one({"file_id": file_id})
+    if not existing:
+        await col.update_one({"file_id": file_id}, {"$set": data}, upsert=True)
+        return True
+    return False
 
 async def get_file_by_id(db_id: str):
     # Pehle DB1 me search karega
