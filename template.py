@@ -1,386 +1,175 @@
 # =========================================================
-# FILE NAME: bot.py
+# FILE NAME: template.py
 # =========================================================
 
-import re
-import math
-import secrets
-import asyncio
-from pyrogram import Client, filters, idle
-from pyrogram.types import (
-    InlineKeyboardMarkup, 
-    InlineKeyboardButton, 
-    Message, 
-    CallbackQuery
-)
-from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
+# --- IMPORTS & LIBRARIES ---
+import math   # Mathematical calculations ke liye (e.g., file sizes/pagination)
+import re     # Regular expressions: filename se dots (.) aur underscores (_) hatane ke liye
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton  # Telegram buttons banane ke liye
 
-# Config, Database, Broadcast aur UI Template imports
-from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
-import database as db
-import template as ui
-from broadcast import handle_broadcast, handle_broadcast_callback
+# /start command par aane wali welcome photo ka direct URL
+START_PIC = "https://graph.org/file/246a70cb4387b59cceb15-9e968f8602a6acb36c.jpg"
 
-bot = Client(
-    "AutoFilterBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    in_memory=True
-)
 
-SEARCH_CACHE = {}
+# --- WELCOME & GUIDE MESSAGES ---
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMINS
-
-# --- AUTO DELETE HELPERS ---
-async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
-    """Delete any message safely without warning"""
-    await asyncio.sleep(delay)
-    try:
-        await client.delete_messages(chat_id=chat_id, message_ids=message_id)
-    except Exception:
-        pass
-
-async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, first_name: str, user_id: int, delay: int):
-    """Wait -> Delete Message -> Send Standalone Warning Alert -> Delete Alert Later"""
-    await asyncio.sleep(delay)
-    try:
-        await client.delete_messages(chat_id=chat_id, message_ids=message_id)
-        alert_text = ui.get_deleted_alert_text(first_name, user_id)
-        alert_msg = await client.send_message(
-            chat_id=chat_id, 
-            text=alert_text,
-            disable_web_page_preview=True
-        )
-        asyncio.create_task(auto_delete_msg(client, chat_id, alert_msg.id, delay=600))
-    except Exception as e:
-        print(f"[AutoDelete Warn Error]: {e}", flush=True)
-
-# --- FORCE SUBSCRIBE (FSUB) HELPERS ---
-async def get_fsub_link(client: Client):
-    if isinstance(FSUB_CHANNEL, int):
-        try:
-            chat = await client.get_chat(FSUB_CHANNEL)
-            return chat.invite_link or f"https://t.me/{chat.username}"
-        except Exception:
-            return "https://t.me"
-    return f"https://t.me/{FSUB_CHANNEL}"
-
-async def is_subscribed(client: Client, user_id: int):
-    if not FSUB_CHANNEL:
-        return True
-    try:
-        member = await client.get_chat_member(FSUB_CHANNEL, user_id)
-        return member.status not in ["left", "kicked"]
-    except UserNotParticipant:
-        return False
-    except Exception:
-        return True
-
-# --- 1. STATS COMMAND ---
-@bot.on_message(filters.command(["stats", "status"]) & filters.private)
-async def stats_handler(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
-
-    stats = await db.get_db_stats()
-    text = (
-        "📊 **Bot & Database Statistics:**\n\n"
-        f"📁 **Total Files in DB:** `{stats['total_files']}`\n"
-        f"🗄️ **Storage Engine:** `{stats['storage_type']}`\n\n"
-        f"👥 **Total Users:** `{stats['total_users']}`\n"
-        f"🚫 **Banned Users:** `{stats['banned_users']}`"
+# /start command bhejne par user ko aane wala greeting text
+def get_start_text(first_name: str) -> str:
+    return (
+        f"Hey 👋 **{first_name}**🤩\n\n"
+        "🍿 **WELCOME TO THE WORLD'S COOLEST SEARCH ENGINE!**\n\n"
+        "Here You Can Request Movie's, Just Sent Movie OR WebSeries Name With Proper **Google** Spelling..!!"
     )
-    await message.reply_text(text)
 
-# --- 2. BROADCAST COMMAND ---
-@bot.on_message(filters.command(["broadcast", "bcast"]) & filters.private)
-async def broadcast_router(client: Client, message: Message):
-    await handle_broadcast(client, message)
+# /start message ke neeche aane wale Search Guide aur Share buttons
+def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
+    share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
+    buttons = [
+        [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", callback_data="btn_search_guide")],
+        [InlineKeyboardButton("📩 SHARE Now 📩", url=share_url)]
+    ]
+    return InlineKeyboardMarkup(buttons)
 
-# --- 3. GROUP WELCOME EVENTS ---
-@bot.on_message(filters.group & filters.new_chat_members)
-async def group_welcome_handler(client: Client, message: Message):
-    for member in message.new_chat_members:
-        # Case 1: Bot khud add hua hai
-        if member.id == client.me.id:
-            welcome_text = ui.get_group_welcome_text(message.chat.title)
-            welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
-            await message.reply_text(
-                text=welcome_text,
-                reply_markup=welcome_buttons,
-                reply_to_message_id=message.id
-            )
-        # Case 2: Koi doosra user ya bot add hua hai
+# Jab koi naya member ya bot group join karta hai tab welcome text (Green Mention Link ke sath)
+def get_user_welcome_text(user_first_name: str, user_id: int, group_title: str) -> str:
+    user_mention = f"[{user_first_name}](tg://user?id={user_id})"
+    return (
+        f"**Hey ❤️ {user_mention} ,**\n"
+        f"**Welcome to {group_title}.../**"
+    )
+
+# Jab bot ko kisi naye group me add kiya jata hai tab admin mangne ka text
+def get_group_welcome_text(group_title: str) -> str:
+    return (
+        f"**Thankyou For Adding Me In**\n"
+        f"**{group_title} ❣️**\n\n"
+        "›› Don't Forget Make Admin 🙃\n"
+        "›› Is Any Doubts About Using\n"
+        "Me Click Below Button..⚡️⚡️."
+    )
+
+# Group me add hone ke baad aane wale Help/Tutorial buttons
+def get_group_welcome_buttons(bot_username: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton("ℹ️ Help", url=f"https://t.me/{bot_username}?start=help"),
+            InlineKeyboardButton("🧑‍🏫Tutorial", url=f"https://t.me/{bot_username}?start=help")
+        ]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+# Search kaise karein uska format/example samjhane wala popup text
+def get_search_guide_text() -> str:
+    return (
+        "📨 **SEND MOVIE OR SERIES NAME AND YEAR AS PER GOOGLE SPELLING..!!** 👍\n\n"
+        "⚠️ **EXAMPLE FOR MOVIE** 👇\n\n"
+        "👉 **Jailer**\n"
+        "👉 **Jailer 2023**\n\n"
+        "⚠️ **EXAMPLE FOR WEBSERIES** 👇\n\n"
+        "👉 **Stranger Things**\n"
+        "👉 **Stranger Things S02 E04**\n\n"
+        "⚠️ **DON'T ADD EMOJIS AND SYMBOLS IN MOVIE NAME, USE LETTERS ONLY..!!** ❌"
+    )
+
+# Database me movie/file na milne par warning text
+def get_no_results_text() -> str:
+    return (
+        "● **I could not find the file you requested** 😕\n\n"
+        "● **Is the movie you asked about released OTT..?**\n\n"
+        "● __Pay attention to the following...__\n\n"
+        "● **Ask for correct spelling.**\n\n"
+        "● **Do not ask for movies that are not released on OTT platforms.**\n\n"
+        "● **Also ask [movie name, language] like this...**"
+    )
+
+# Force-Subscribe (FSUB) verification channel join karne ke buttons
+def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
+        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot_username}?start=start")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+# --- FORMATTING & UTILITIES ---
+
+# File size (bytes) ko readable format (KB, MB, GB) me convert karne ke liye
+def humanbytes(size: int) -> str:
+    if not size:
+        return "0 B"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024.0:
+            break
+        size /= 1024.0
+    return f"{size:.2f} {unit}"
+
+# File button par display hone wala title format: "1.4 GB • Movie Name"
+def format_btn_name(file_name: str, file_size: int) -> str:
+    size_str = humanbytes(file_size)
+    clean_title = file_name.replace("_", " ").replace(".", " ")
+    return f"{size_str} • {clean_title}"
+
+# Search results ke sath aane wala main caption
+def get_search_caption(first_name: str, query: str) -> str:
+    return (
+        f"Hey **{first_name}** 👋\n\n"
+        "⭕️Rotate your 🔄 phone to see files' full name...........................................⭕️\n\n"
+        f"***Title : {query}***\n"
+        "***Your Files is Ready Now***"
+    )
+
+# Exact Screenshot Format: File Caption with 1 Minute Warning
+def get_file_caption(raw_file_name: str) -> str:
+    clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
+    return (
+        f"**{clean_name}**\n\n"
+        "**⚠️❌👉This file automatically ❗ delete after 1 minute ❗ so please forward in another chat👉❌**"
+    )
+
+# Auto-delete timer complete hone ke baad delete confirmation message
+def get_deleted_alert_text(first_name: str, user_id: int) -> str:
+    user_mention = f"[{first_name}](tg://user?id={user_id})"
+    return (
+        f"Hey {user_mention},\n\n"
+        "**Your Request Has Been Deleted👍🏻**\n"
+        "*(Due To Avoid Copyrights Issue😌)*\n\n"
+        "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
+    )
+
+
+# --- SEARCH RESULT PAGINATION KEYBOARD ---
+
+# Search results ke buttons aur Next/Previous pages create karne ka logic
+def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
+    buttons = []
+    
+    # Sabse upar Movie Title ka header button
+    buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
+    
+    # Har matching file ka clickable Deep-Link button (jo PM me file bhejta hai)
+    for f in files:
+        file_db_id = str(f["_id"])
+        btn_text = format_btn_name(f["file_name"], f["file_size"])
+        buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
+    
+    # Page Navigation Row (Previous / Current Page / Next Buttons)
+    bottom_row = []
+    if total_pages <= 1:
+        bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
+        bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
+    else:
+        # Pichle page par jane ka button
+        if page > 1:
+            bottom_row.append(InlineKeyboardButton("⏮ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
-            welcome_user_text = ui.get_user_welcome_text(member.first_name, member.id, message.chat.title)
-            await message.reply_text(
-                text=welcome_user_text,
-                reply_to_message_id=message.id
-            )
-
-# --- 4. ADMIN COMMANDS: BAN & UNBAN ---
-@bot.on_message(filters.command("ban") & (filters.private | filters.group))
-async def ban_handler(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
-
-    target_id = None
-    if message.reply_to_message:
-        target_id = message.reply_to_message.from_user.id
-    elif len(message.command) > 1:
-        try:
-            target_id = int(message.command[1])
-        except ValueError:
-            return await message.reply_text("⚠️ Sahi numeric user ID dalein.")
-
-    if not target_id:
-        return await message.reply_text("⚠️ Usage: `/ban user_id` ya message ko reply karein.")
-
-    await db.ban_user(target_id)
-    await message.reply_text(f"🚫 User `{target_id}` ko ban kar diya gaya hai.")
-
-@bot.on_message(filters.command("unban") & (filters.private | filters.group))
-async def unban_handler(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
-
-    target_id = None
-    if message.reply_to_message:
-        target_id = message.reply_to_message.from_user.id
-    elif len(message.command) > 1:
-        try:
-            target_id = int(message.command[1])
-        except ValueError:
-            return await message.reply_text("⚠️ Sahi numeric user ID dalein.")
-
-    if not target_id:
-        return await message.reply_text("⚠️ Usage: `/unban user_id` ya message ko reply karein.")
-
-    await db.unban_user(target_id)
-    await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
-
-# --- 5. ADMIN COMMANDS: FILE DELETION ---
-@bot.on_message(filters.command("delete"))
-async def delete_single_cmd(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
-
-    if message.reply_to_message:
-        target_msg = message.reply_to_message
-        media = target_msg.document or target_msg.video or target_msg.audio
-        if media:
-            deleted = await db.delete_single_file(file_id=media.file_id)
-            if deleted:
-                return await message.reply_text("🗑️ File database se delete kar di gayi hai.")
-            return await message.reply_text("⚠️ File database me nahi mili.")
-        elif target_msg.text or target_msg.caption:
-            name_query = target_msg.text or target_msg.caption
-            deleted = await db.delete_single_file(file_name=name_query)
-            if deleted:
-                return await message.reply_text(f"🗑️ `{name_query}` database se delete kar di gayi hai.")
-            return await message.reply_text("⚠️ File database me nahi mili.")
-
-    if len(message.command) > 1:
-        name_query = message.text.split(None, 1)[1].strip()
-        count = await db.delete_single_file(file_name=name_query)
-        if count:
-            return await message.reply_text(f"🗑️ `{name_query}` file delete kar di gayi hai.")
-        return await message.reply_text("⚠️ File database me nahi mili.")
-
-    await message.reply_text("⚠️ File ko reply karke `/delete` ya `/delete Movie_Name` likhein.")
-
-@bot.on_message(filters.command(["deletefiles", "deleteall", "delall"]))
-async def delete_files_cmd(client: Client, message: Message):
-    if not is_admin(message.from_user.id):
-        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
-
-    if len(message.command) < 2:
-        return await message.reply_text("⚠️ Movie ka naam likhein: `/deletefiles Movie_Name`")
-
-    movie_name = message.text.split(None, 1)[1].strip()
-    status_msg = await message.reply_text(f"🔍 `{movie_name}` ki files delete ho rahi hain...")
-    deleted_count = await db.delete_files_by_name(movie_name)
-    await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
-
-# --- 6. START COMMAND & FILE DELIVERY ---
-@bot.on_message(filters.command("start") & filters.private)
-async def start_handler(client: Client, message: Message):
-    user_id = message.from_user.id if message.from_user else message.chat.id
-    first_name = message.from_user.first_name if message.from_user else "User"
-
-    if await db.is_user_banned(user_id):
-        return await message.reply_text("⛔ **Aapko bot se ban kiya gaya hai.**")
-
-    await db.add_user(user_id)
-
-    if not await is_subscribed(client, user_id):
-        invite_link = await get_fsub_link(client)
-        buttons = ui.get_fsub_buttons(invite_link, client.me.username)
-        try:
-            return await message.reply_photo(
-                photo=ui.START_PIC,
-                caption="⚠️ **Access Denied!**\n\nPehle hamara update channel join karein, fir **Try Again** par click karein.",
-                reply_markup=buttons,
-                reply_to_message_id=message.id
-            )
-        except Exception:
-            return await message.reply_text(
-                "⚠️ **Access Denied!**\n\nPehle hamara update channel join karein, fir **Try Again** par click karein.",
-                reply_markup=buttons,
-                reply_to_message_id=message.id
-            )
-
-    if len(message.command) > 1 and message.command[1].startswith("file_"):
-        db_id = message.command[1].replace("file_", "")
-        file_data = await db.get_file_by_id(db_id)
-        if file_data:
-            caption_text = ui.get_file_caption(file_data["file_name"])
-            sent_msg = await client.send_cached_media(
-                chat_id=user_id,
-                file_id=file_data["file_id"],
-                caption=caption_text
-            )
-            # Auto delete file after exactly 60 seconds (1 minute) as per caption
-            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
-            return
-
-    caption_text = ui.get_start_text(first_name)
-    markup = ui.get_start_buttons(client.me.username)
-
-    sent_start = None
-    try:
-        sent_start = await message.reply_photo(
-            photo=ui.START_PIC,
-            caption=caption_text,
-            reply_markup=markup
-        )
-    except Exception:
-        sent_start = await message.reply_text(text=caption_text, reply_markup=markup)
-
-    if sent_start:
-        asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
-
-# --- 7. AUTO INDEX IN DB CHANNEL ---
-@bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
-async def auto_index(client: Client, message: Message):
-    media = message.document or message.video or message.audio
-    if not media:
-        return
-    file_name = getattr(media, "file_name", None) or message.caption or "Unknown"
-    await db.save_file(
-        file_id=media.file_id,
-        file_name=file_name,
-        file_size=media.file_size,
-        caption=message.caption or ""
-    )
-    print(f"[INDEXED]: {file_name}", flush=True)
-
-# --- 8. MOVIE SEARCH HANDLER ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status", "broadcast", "bcast"]))
-async def filter_search(client: Client, message: Message):
-    if not message.from_user:
-        return
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name or "User"
-    chat_id = message.chat.id
-
-    if await db.is_user_banned(user_id):
-        return await message.reply_text("⛔ **Aap ban hain, bot use nahi kar sakte.**")
-
-    if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
-        invite_link = await get_fsub_link(client)
-        btn = [[InlineKeyboardButton("📢 Join Channel", url=invite_link)]]
-        return await message.reply_text(
-            "⚠️ Pehle hamara update channel join karein.", 
-            reply_markup=InlineKeyboardMarkup(btn),
-            reply_to_message_id=message.id
-        )
-
-    query = message.text.strip()
-    total_results = await db.count_files(query)
-
-    if total_results == 0:
-        no_res_msg = await message.reply_text(
-            text=ui.get_no_results_text(),
-            reply_to_message_id=message.id
-        )
-        asyncio.create_task(auto_delete_msg(client, chat_id, no_res_msg.id, delay=300))
-        return
-
-    query_id = secrets.token_hex(4)
-    SEARCH_CACHE[query_id] = query
-
-    total_pages = math.ceil(total_results / 10)
-    files = await db.search_files(query, offset=0, limit=10)
-
-    caption_text = ui.get_search_caption(first_name, query)
-    keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
-
-    search_msg = await message.reply_text(
-        text=caption_text, 
-        reply_markup=keyboard,
-        reply_to_message_id=message.id
-    )
-
-    asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
-
-# --- 9. CALLBACK ROUTER ---
-@bot.on_callback_query()
-async def callback_router(client: Client, query: CallbackQuery):
-    data = query.data
-    first_name = query.from_user.first_name or "User"
-
-    # Broadcast confirmation aur mode selection callback
-    if data.startswith("bcast_"):
-        await handle_broadcast_callback(client, query)
-        return
-
-    elif data == "btn_search_guide":
-        await query.answer()
-        guide_text = ui.get_search_guide_text()
-        guide_msg = await query.message.reply_text(text=guide_text)
-        asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
-        return
-
-    # Pagination navigation
-    elif data.startswith("page_"):
-        try:
-            _, query_id, page_str = data.split("_")
-            page = int(page_str)
-            search_query = SEARCH_CACHE.get(query_id)
-
-            if not search_query:
-                return await query.answer("⚠️ Session Expired! Please search again.", show_alert=True)
-
-            total_results = await db.count_files(search_query)
-            total_pages = math.ceil(total_results / 10)
-            offset = (page - 1) * 10
-            files = await db.search_files(search_query, offset=offset, limit=10)
-
-            caption_text = ui.get_search_caption(first_name, search_query)
-            keyboard = ui.build_pagination_keyboard(files, query_id, page, total_pages, search_query, client.me.username)
-
-            await query.message.edit_text(text=caption_text, reply_markup=keyboard)
-        except MessageNotModified:
-            pass
-        except Exception as e:
-            print(f"Pagination Error: {e}", flush=True)
-        finally:
-            await query.answer()
-
-    elif data in ["pages_click", "header_click"]:
-        await query.answer()
-
-# --- MAIN RUNNER ---
-async def main():
-    await db.init_db()
-    await bot.start()
-    print(">>> BOT IS ONLINE (CONNECTED TO TURSO DB) <<<", flush=True)
-    await idle()
-    await bot.stop()
-
-if __name__ == "__main__":
-    bot.run(main())
+            bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
+        
+        # Current page number (e.g. 1 / 5)
+        bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
+        
+        # Agle page par jane ka button
+        if page < total_pages:
+            bottom_row.append(InlineKeyboardButton("Next ⏭", callback_data=f"page_{query_id}_{page+1}"))
+            
+    buttons.append(bottom_row)
+    return InlineKeyboardMarkup(buttons)
