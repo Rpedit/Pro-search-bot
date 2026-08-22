@@ -81,12 +81,14 @@ async def start_handler(client: Client, message: Message):
             return await message.reply_photo(
                 photo=ui.START_PIC,
                 caption="⚠️ **Access Denied!**\n\nPehle hamara update channel join karein, fir **Try Again** par click karein.",
-                reply_markup=buttons
+                reply_markup=buttons,
+                reply_to_message_id=message.id
             )
         except Exception:
             return await message.reply_text(
                 "⚠️ **Access Denied!**\n\nPehle hamara update channel join karein, fir **Try Again** par click karein.",
-                reply_markup=buttons
+                reply_markup=buttons,
+                reply_to_message_id=message.id
             )
 
     # Deep Link Handler (File Delivery: 4 min delete -> 10 min alert delete)
@@ -136,7 +138,7 @@ async def auto_index(client: Client, message: Message):
     )
     print(f"[INDEXED]: {file_name}", flush=True)
 
-# --- SEARCH HANDLER ---
+# --- SEARCH HANDLER (BOX / QUOTE REPLY) ---
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -147,14 +149,21 @@ async def filter_search(client: Client, message: Message):
     if message.chat.type.value == "private" and not await is_subscribed(client, user_id):
         invite_link = await get_fsub_link(client)
         btn = [[InlineKeyboardButton("📢 Join Channel", url=invite_link)]]
-        return await message.reply_text("⚠️ Pehle hamara update channel join karein.", reply_markup=InlineKeyboardMarkup(btn))
+        return await message.reply_text(
+            "⚠️ Pehle hamara update channel join karein.", 
+            reply_markup=InlineKeyboardMarkup(btn),
+            reply_to_message_id=message.id
+        )
 
     query = message.text.strip()
     total_results = await db.count_files(query)
 
-    # Not Found Message (Auto-deletes in 5 minutes / 300s)
+    # Not Found Message with Quote Box (5 minutes / 300s auto delete)
     if total_results == 0:
-        no_res_msg = await message.reply_text(text=ui.get_no_results_text())
+        no_res_msg = await message.reply_text(
+            text=ui.get_no_results_text(),
+            reply_to_message_id=message.id
+        )
         asyncio.create_task(auto_delete_msg(client, user_id, no_res_msg.id, delay=300))
         return
 
@@ -167,9 +176,13 @@ async def filter_search(client: Client, message: Message):
     caption_text = ui.get_search_caption(first_name, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
-    search_msg = await message.reply_text(text=caption_text, reply_markup=keyboard)
+    # Search result message with Quote Box (4.5 minutes / 270s auto delete)
+    search_msg = await message.reply_text(
+        text=caption_text, 
+        reply_markup=keyboard,
+        reply_to_message_id=message.id
+    )
 
-    # Search result buttons delete in 4.5 minutes (270s)
     asyncio.create_task(auto_delete_msg(client, user_id, search_msg.id, delay=270))
 
 # --- CALLBACK ROUTER ---
