@@ -1,14 +1,17 @@
 import libsql_client
 from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
 
-# Correct async client method
-client = libsql_client.create_client(
-    url=TURSO_DB_URL,
-    auth_token=TURSO_AUTH_TOKEN
-)
+client = None
 
-# --- INITIALIZE TABLES & INDEXES ---
+# --- INITIALIZE DATABASE & CLIENT INSIDE ASYNC LOOP ---
 async def init_db():
+    global client
+    if client is None:
+        client = libsql_client.create_client(
+            url=TURSO_DB_URL,
+            auth_token=TURSO_AUTH_TOKEN
+        )
+    
     await client.execute("""
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
