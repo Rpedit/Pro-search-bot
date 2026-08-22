@@ -28,7 +28,7 @@ INDEX_RUNNING = False
 def is_admin(user_id: int) -> bool:
     return user_id in ADMINS
 
-# --- GENERAL AUTO DELETE HELPER ---
+# --- AUTO DELETE HELPER ---
 async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
     await asyncio.sleep(delay)
     try:
@@ -36,7 +36,7 @@ async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: 
     except Exception:
         pass
 
-# --- DELETE TARGET & SEND WARNING ALERT ---
+# --- DELETE & SEND WARNING ALERT ---
 async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, first_name: str, user_id: int, delay: int):
     await asyncio.sleep(delay)
     try:
@@ -71,7 +71,7 @@ async def is_subscribed(client: Client, user_id: int):
     except Exception:
         return True
 
-# --- 1. STATS / STATUS COMMAND ---
+# --- 1. STATS COMMAND ---
 @bot.on_message(filters.command(["stats", "status"]) & filters.private)
 async def stats_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -229,13 +229,13 @@ async def bulk_index_handler(client: Client, message: Message):
     finally:
         INDEX_RUNNING = False
 
-# --- 5. ADMIN COMMANDS: DELETE (BY REPLY/FORWARD OR NAME) ---
+# --- 5. ADMIN COMMANDS: DELETE (SINGLE BY FORWARD/REPLY OR NAME) ---
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
         return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
 
-    # 1. Forward ya normal media message ko reply karke delete
+    # 1. Agar forward ki hui file ya normal media message ko reply karke /delete diya ho
     if message.reply_to_message:
         target_msg = message.reply_to_message
         media = target_msg.document or target_msg.video or target_msg.audio
@@ -247,6 +247,7 @@ async def delete_single_cmd(client: Client, message: Message):
             else:
                 return await message.reply_text("⚠️ Ye file database me nahi mili.")
         
+        # Agar caption/text message forward kiya ho
         elif target_msg.text or target_msg.caption:
             query_name = target_msg.text or target_msg.caption
             deleted = await db.delete_single_file(file_name=query_name)
@@ -255,7 +256,7 @@ async def delete_single_cmd(client: Client, message: Message):
             else:
                 return await message.reply_text("⚠️ Ye file database me nahi mili.")
 
-    # 2. Direct naam se single delete: /delete Movie_Name
+    # 2. Agar direct naam likhkar /delete diya ho: /delete Movie_Name
     if len(message.command) > 1:
         name_query = message.text.split(None, 1)[1].strip()
         deleted = await db.delete_single_file(file_name=name_query)
@@ -264,7 +265,7 @@ async def delete_single_cmd(client: Client, message: Message):
         else:
             return await message.reply_text(f"❌ Database me `{name_query}` ki koi file nahi mili.")
 
-    await message.reply_text("⚠️ **Usage:**\n1. Forwarded file ko reply karke: `/delete`\n2. Direct naam likhein: `/delete Movie_Name`")
+    await message.reply_text("⚠️ **Usage:**\n1. Kisi bhi forward ki hui file ko reply karke: `/delete`\n2. Direct naam likhein: `/delete Movie_Name`")
 
 # --- 6. ADMIN COMMANDS: DELETEFILES (ALL MATCHING FILES) ---
 @bot.on_message(filters.command(["deletefiles", "deleteall", "delall"]))
@@ -325,7 +326,7 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- GROUP WELCOME EVENTS ---
+# --- SCREENSHOT REPLIES: GROUP WELCOME & ADDED EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
@@ -337,7 +338,7 @@ async def group_welcome_handler(client: Client, message: Message):
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
             await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
-# --- START COMMAND ---
+# --- START COMMAND (BOT PRIVATE CHAT) ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
