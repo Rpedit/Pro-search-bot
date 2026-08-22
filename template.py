@@ -118,12 +118,12 @@ def get_search_caption(first_name: str, query: str) -> str:
         "***Your Files is Ready Now***"
     )
 
-# File bhejne ke waqt caption jisme auto-delete warning hoti hai
+# Exact Screenshot Format: File Caption with 1 Minute Warning
 def get_file_caption(raw_file_name: str) -> str:
     clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
     return (
         f"**{clean_name}**\n\n"
-        "⚠️❌👉This file automatically ❗ delete after 4 minutes ❗ so please forward in another chat👉❌"
+        "**⚠️❌👉This file automatically ❗ delete after 1 minute ❗ so please forward in another chat👉❌**"
     )
 
 # Auto-delete timer complete hone ke baad delete confirmation message
