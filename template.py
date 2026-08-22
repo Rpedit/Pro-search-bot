@@ -14,7 +14,8 @@ def get_start_text(first_name: str) -> str:
 def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
     buttons = [
-        [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", callback_data="btn_search_guide")],
+        # Click hone par message typing box scroll hokar active ho jayega
+        [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("📩 SHARE Now 📩", url=share_url)]
     ]
     return InlineKeyboardMarkup(buttons)
