@@ -1,5 +1,6 @@
 import math
 import secrets
+import asyncio
 from pyrogram import Client, filters, idle
 from pyrogram.types import (
     InlineKeyboardMarkup, 
@@ -11,7 +12,6 @@ from pyrogram.errors import UserNotParticipant, MessageNotModified
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL
 import database as db
 import template as ui
-from auto_delete import start_auto_delete_task
 
 bot = Client(
     "AutoFilterBot",
@@ -22,6 +22,17 @@ bot = Client(
 )
 
 SEARCH_CACHE = {}
+
+# --- 4-MINUTE IN-BUILT AUTO DELETE SYSTEM ---
+async def auto_delete_file(client: Client, chat_id: int, message_id: int, first_name: str, delay: int = 240):
+    """Wait for 4 minutes (240s) -> Delete File -> Send Copyright Alert"""
+    await asyncio.sleep(delay)
+    try:
+        await client.delete_messages(chat_id=chat_id, message_ids=message_id)
+        alert_text = ui.get_deleted_alert_text(first_name)
+        await client.send_message(chat_id=chat_id, text=alert_text)
+    except Exception as e:
+        print(f"[AutoDelete Error]: {e}", flush=True)
 
 async def get_fsub_link(client: Client):
     if isinstance(FSUB_CHANNEL, int):
@@ -66,7 +77,7 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons
             )
 
-    # Deep Link Handler (4-Minute Timer + Post Delete Notification Alert)
+    # Deep Link Handler (Direct Send + 4-Min Auto Delete + Alert Trigger)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -77,8 +88,8 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            # Start 4-Minute (240s) Auto Delete Task with notification
-            start_auto_delete_task(client, user_id, sent_msg.id, first_name=first_name, delay=240)
+            # Auto delete in 4 minutes (240 seconds)
+            asyncio.create_task(auto_delete_file(client, user_id, sent_msg.id, first_name=first_name, delay=240))
             return
 
     caption_text = ui.get_start_text(first_name)
