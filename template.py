@@ -19,6 +19,22 @@ def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
+def get_group_welcome_text(group_title: str) -> str:
+    return (
+        f"**Thankyou For Adding Me In {group_title}** ❣️\n\n"
+        "›› **Don't Forget Make Admin** 🙃\n"
+        "›› **Is Any Doubts About Using Me Click Below Button..**⚡️⚡️."
+    )
+
+def get_group_welcome_buttons(bot_username: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton("ℹ️ Help", url=f"https://t.me/{bot_username}?start=help"),
+            InlineKeyboardButton("🧑‍🏫Tutorial", url=f"https://t.me/{bot_username}?start=help")
+        ]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
 def get_search_guide_text() -> str:
     return (
         "📨 **SEND MOVIE OR SERIES NAME AND YEAR AS PER GOOGLE SPELLING..!!** 👍\n\n"
@@ -77,9 +93,10 @@ def get_file_caption(raw_file_name: str) -> str:
         "⚠️❌👉This file automatically ❗ delete after 4 minutes ❗ so please forward in another chat👉❌"
     )
 
-def get_deleted_alert_text(first_name: str) -> str:
+def get_deleted_alert_text(first_name: str, user_id: int) -> str:
+    user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
-        f"Hey __{first_name}__,\n\n"
+        f"Hey {user_mention},\n\n"
         "**Your Request Has Been Deleted👍🏻**\n"
         "*(Due To Avoid Copyrights Issue😌)*\n\n"
         "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
