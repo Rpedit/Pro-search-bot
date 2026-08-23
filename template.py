@@ -10,6 +10,69 @@ def get_start_text(first_name: str) -> str:
         "Here You Can Request Movie's, Just Sent Movie OR WebSeries Name With Proper **Google** Spelling..!!"
     )
 
+def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
+    share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
+    buttons = [
+        [InlineKeyboardButton("🔍 SEARCH MOVIES OR SERIES 🔍", callback_data="btn_search_guide")],
+        [InlineKeyboardButton("📩 SHARE Now 📩", url=share_url)]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def get_user_welcome_text(user_first_name: str, group_title: str) -> str:
+    return f"Hey ❤️ **{user_first_name}** 🍿 , Welcome to **{group_title}**.../"
+
+def get_group_welcome_text(group_title: str) -> str:
+    return (
+        f"**Thankyou For Adding Me In {group_title}** ❣️\n\n"
+        "›› **Don't Forget Make Admin** 🙃\n"
+        "›› **Is Any Doubts About Using Me Click Below Button..**⚡️⚡️."
+    )
+
+def get_group_welcome_buttons(bot_username: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton("ℹ️ Help", url=f"https://t.me/{bot_username}?start=help"),
+            InlineKeyboardButton("🧑‍🏫 Tutorial", url=f"https://t.me/{bot_username}?start=help")
+        ]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def get_search_guide_text() -> str:
+    return (
+        "📨 **SEND MOVIE OR SERIES NAME AND YEAR AS PER GOOGLE SPELLING..!!** 👍\n\n"
+        "⚠️ **EXAMPLE FOR MOVIE** 👇\n\n"
+        "👉 **Jailer**\n"
+        "👉 **Jailer 2023**\n\n"
+        "⚠️ **EXAMPLE FOR WEBSERIES** 👇\n\n"
+        "👉 **Stranger Things**\n"
+        "👉 **Stranger Things S02 E04**\n\n"
+        "⚠️ **DON'T ADD EMOJIS AND SYMBOLS IN MOVIE NAME, USE LETTERS ONLY..!!** ❌"
+    )
+
+def get_no_results_text() -> str:
+    return (
+        "● **I could not find the file you requested** 😕\n\n"
+        "● **Is the movie you asked about released OTT..?**\n\n"
+        "● __Pay attention to the following...__\n\n"
+        "● **Ask for correct spelling.**\n\n"
+        "● **Do not ask for movies that are not released on OTT platforms.**\n\n"
+        "● **Also ask [movie name, language] like this...**"
+    )
+
+# --- MISSING FUNCTION ADDED ---
+def get_no_results_buttons() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("🔍 How To Search 🔍", callback_data="btn_search_guide")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
+        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot_username}?start=start")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
 def humanbytes(size: int) -> str:
     if not size:
         return "0 B"
@@ -45,49 +108,28 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
         "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
     )
 
-def get_no_results_text() -> str:
-    return (
-        "● **I could not find the file you requested** 😕\n\n"
-        "● **Is the movie you asked about released OTT..?**\n\n"
-        "● __Pay attention to the following...__\n\n"
-        "● **Ask for correct spelling.**\n\n"
-        "● **Do not ask for movies that are not released on OTT platforms.**\n\n"
-        "● **Also ask [movie name, language] like this...**"
-    )
-
-def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
-        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot_username}?start=start")]
-    ]
-    return InlineKeyboardMarkup(buttons)
-
-# --- PERFECT 3-BUTTON BOTTOM ROW LIKE SCREENSHOT ---
+# --- 3-BUTTON PAGINATION ROW ---
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # 1. Header Movie Title Button
+    # Header Button
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # 2. Movie Files Deep-Link Buttons
+    # File list buttons
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # 3. Bottom Row (Exact Screenshot Alignment)
+    # Bottom Row Navigation
     bottom_row = []
-    
-    # Left Button: Page 1 par "■ Pages", aage ke pages par "⏮ Previous"
     if page > 1:
         bottom_row.append(InlineKeyboardButton("⏮ Previous", callback_data=f"page_{query_id}_{page-1}"))
     else:
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
     
-    # Middle Button: "1 / 2" ya "2 / 2"
     bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
     
-    # Right Button: Last page na ho toh "Next ⏭"
     if page < total_pages:
         bottom_row.append(InlineKeyboardButton("Next ⏭", callback_data=f"page_{query_id}_{page+1}"))
         
