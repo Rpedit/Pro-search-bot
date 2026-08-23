@@ -124,7 +124,7 @@ def get_file_caption(raw_file_name: str) -> str:
             words.append(w.capitalize())
     clean_name = " ".join(words)
     return (
-        f"**{clean_name}**\n\n"
+        CAPTION = """<b>{file_name}</b>
         "**⚠️❌👉This file automatically ❗**\n"
         "**delete after 1 minute ❗ so please**\n"
         "**forward in another chat👉❌**"
