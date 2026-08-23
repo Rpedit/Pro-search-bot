@@ -1,3 +1,4 @@
+import re
 import libsql_client
 from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
 
@@ -46,25 +47,58 @@ class Database:
             return False
 
     async def search_files(self, search_text, limit=10, offset=0):
-        # Clean special chars for matching
-        clean_text = search_text.strip().replace(" ", "%")
-        query = """
+        # Dots, underscores, hyphens, brackets ko space me convert karta hai
+        cleaned = re.sub(r"[\.\_\-\[\]\(\)\+]", " ", search_text)
+        words = [w.strip() for w in cleaned.split() if len(w.strip()) > 0]
+        
+        if not words:
+            return []
+
+        # Har search word ke liye LIKE condition (case-insensitive)
+        conditions = " AND ".join(["LOWER(file_name) LIKE ?" for _ in words])
+        params = [f"%{w.lower()}%" for w in words]
+        params.extend([limit, offset])
+
+        query = f"""
         SELECT file_id, file_name, file_size FROM files
-        WHERE file_name LIKE ?
+        WHERE {conditions}
         LIMIT ? OFFSET ?
         """
-        res = await self.client.execute(query, [f"%{clean_text}%", limit, offset])
-        return res.rows
+        try:
+            res = await self.client.execute(query, params)
+            results = []
+            for row in res.rows:
+                f_id = row[0] if isinstance(row, (list, tuple)) else row["file_id"]
+                f_name = row[1] if isinstance(row, (list, tuple)) else row["file_name"]
+                f_size = row[2] if isinstance(row, (list, tuple)) else row["file_size"]
+                results.append((f_id, f_name, f_size))
+            return results
+        except Exception as e:
+            print(f"Search Query Error: {e}")
+            return []
 
     async def get_file(self, file_id):
         query = "SELECT file_id, file_name, file_size, caption FROM files WHERE file_id = ?"
-        res = await self.client.execute(query, [file_id])
-        if res.rows:
-            return res.rows[0]
+        try:
+            res = await self.client.execute(query, [file_id])
+            if res.rows:
+                row = res.rows[0]
+                f_id = row[0] if isinstance(row, (list, tuple)) else row["file_id"]
+                f_name = row[1] if isinstance(row, (list, tuple)) else row["file_name"]
+                f_size = row[2] if isinstance(row, (list, tuple)) else row["file_size"]
+                caption = row[3] if isinstance(row, (list, tuple)) else row["caption"]
+                return (f_id, f_name, f_size, caption)
+        except Exception as e:
+            print(f"Get File Error: {e}")
         return None
 
     async def total_files(self):
-        res = await self.client.execute("SELECT COUNT(*) FROM files")
-        return res.rows[0][0] if res.rows else 0
+        try:
+            res = await self.client.execute("SELECT COUNT(*) FROM files")
+            if res.rows:
+                return res.rows[0][0] if isinstance(res.rows[0], (list, tuple)) else res.rows[0]["COUNT(*)"]
+        except Exception as e:
+            print(f"Total Files Count Error: {e}")
+        return 0
 
 db = Database()
