@@ -6,16 +6,18 @@ class Database:
         self.url = url
         self.auth_token = auth_token
 
-    async def get_client(self):
-        return libsql_client.create_client_async(
+    def get_client(self):
+        # libsql-client uses standard create_client
+        return libsql_client.create_client(
             url=self.url,
             auth_token=self.auth_token
         )
 
     async def setup(self):
-        client = await self.get_client()
-        async with client:
-            await client.execute("""
+        # Turso client calls are synchronous or handled via standard execution
+        client = self.get_client()
+        try:
+            client.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     file_id TEXT,
@@ -23,20 +25,23 @@ class Database:
                     file_size TEXT
                 )
             """)
+        finally:
+            client.close()
 
     async def add_file(self, file_id, file_name, file_size):
-        client = await self.get_client()
-        async with client:
-            await client.execute(
+        client = self.get_client()
+        try:
+            client.execute(
                 "INSERT INTO files (file_id, file_name, file_size) VALUES (?, ?, ?)",
                 [file_id, file_name, file_size]
             )
+        finally:
+            client.close()
 
     async def search_files(self, query, max_results=10):
-        client = await self.get_client()
-        async with client:
-            # SQL LIKE query for searching files
-            result = await client.execute(
+        client = self.get_client()
+        try:
+            result = client.execute(
                 "SELECT file_id, file_name, file_size FROM files WHERE file_name LIKE ? LIMIT ?",
                 [f"%{query}%", max_results]
             )
@@ -48,5 +53,7 @@ class Database:
                     "file_size": row[2]
                 })
             return files
+        finally:
+            client.close()
 
 db = Database(TURSO_DB_URL, TURSO_AUTH_TOKEN)
