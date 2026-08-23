@@ -115,11 +115,11 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
     # Header Button
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # File list buttons
+    # File list buttons (Arrow remove karne ke liye callback_data use kiya hai)
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
-        buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
+        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"file_{file_db_id}")])
     
     # Bottom Row Navigation
     bottom_row = []
@@ -131,7 +131,7 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
     bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
     
     if page < total_pages:
-        bottom_row.append(InlineKeyboardButton("Next ⏭", callback_data=f"page_{query_id}_{page+1}"))
+        bottom_row.append(InlineKeyboardButton("Next ⏩", callback_data=f"page_{query_id}_{page+1}"))
         
     buttons.append(bottom_row)
     return InlineKeyboardMarkup(buttons)
