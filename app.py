@@ -1,13 +1,20 @@
-from fastapi import FastAPI, Response
+import asyncio
+from fastapi import FastAPI
+from bot import bot
+from database import db
 
 app = FastAPI()
 
-@app.get("/")
-@app.head("/")
-async def home():
-    return Response(content='{"status": "Bot is running healthy on Render!"}', media_type="application/json")
+@app.on_event("startup")
+async def start_services():
+    await db.connect()
+    await bot.start()
+    print("🚀 Bot and Database Started Successfully via FastAPI!")
 
-@app.get("/health")
-@app.head("/health")
-async def health():
-    return Response(content='{"status": "ok"}', media_type="application/json")
+@app.on_event("shutdown")
+async def stop_services():
+    await bot.stop()
+
+@app.get("/")
+def home():
+    return {"status": "running", "bot": "HD Pro Search"}
