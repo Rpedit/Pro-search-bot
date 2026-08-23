@@ -36,28 +36,60 @@ def get_file_caption(raw_file_name: str) -> str:
     clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
     return f"**{clean_name}**"
 
+def get_deleted_alert_text(first_name: str, user_id: int) -> str:
+    user_mention = f"[{first_name}](tg://user?id={user_id})"
+    return (
+        f"Hey {user_mention},\n\n"
+        "**Your Request Has Been Deleted👍🏻**\n"
+        "*(Due To Avoid Copyrights Issue😌)*\n\n"
+        "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
+    )
+
+def get_no_results_text() -> str:
+    return (
+        "● **I could not find the file you requested** 😕\n\n"
+        "● **Is the movie you asked about released OTT..?**\n\n"
+        "● __Pay attention to the following...__\n\n"
+        "● **Ask for correct spelling.**\n\n"
+        "● **Do not ask for movies that are not released on OTT platforms.**\n\n"
+        "● **Also ask [movie name, language] like this...**"
+    )
+
+def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
+        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot_username}?start=start")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+# --- PERFECT 3-BUTTON BOTTOM ROW LIKE SCREENSHOT ---
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Title button (Top header)
+    # 1. Header Movie Title Button
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # File result buttons as Deep Links
+    # 2. Movie Files Deep-Link Buttons
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Navigation row
+    # 3. Bottom Row (Exact Screenshot Alignment)
     bottom_row = []
-    if total_pages <= 1:
-        bottom_row.append(InlineKeyboardButton("■ Pages 1/1 ■", callback_data="pages_click"))
+    
+    # Left Button: Page 1 par "■ Pages", aage ke pages par "⏮ Previous"
+    if page > 1:
+        bottom_row.append(InlineKeyboardButton("⏮ Previous", callback_data=f"page_{query_id}_{page-1}"))
     else:
-        if page > 1:
-            bottom_row.append(InlineKeyboardButton("⏮ Previous", callback_data=f"page_{query_id}_{page-1}"))
-        bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
-        if page < total_pages:
-            bottom_row.append(InlineKeyboardButton("Next ⏭", callback_data=f"page_{query_id}_{page+1}"))
-            
+        bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
+    
+    # Middle Button: "1 / 2" ya "2 / 2"
+    bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
+    
+    # Right Button: Last page na ho toh "Next ⏭"
+    if page < total_pages:
+        bottom_row.append(InlineKeyboardButton("Next ⏭", callback_data=f"page_{query_id}_{page+1}"))
+        
     buttons.append(bottom_row)
     return InlineKeyboardMarkup(buttons)
