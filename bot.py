@@ -1,5 +1,4 @@
 import logging
-import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultCachedDocument
 from config import API_ID, API_HASH, BOT_TOKEN, FSUB_CHANNEL, ADMINS
@@ -7,8 +6,9 @@ from database import db
 
 logging.basicConfig(level=logging.INFO)
 
+# Main client
 app = Client(
-    "iPapkornCloneBot",
+    "HDProSearchBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
@@ -16,9 +16,6 @@ app = Client(
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
-    # Turso DB setup check on start
-    await db.setup()
-    
     # Force Subscription Check
     if FSUB_CHANNEL:
         try:
@@ -28,7 +25,7 @@ async def start_handler(client, message):
                 await message.reply("❌ Aapko channel se ban kar diya gaya hai!")
                 return
         except Exception:
-            channel_username = FSUB_CHANNEL if not isinstance(FSUB_CHANNEL, int) else "your_channel"
+            channel_username = FSUB_CHANNEL if not isinstance(FSUB_CHANNEL, int) else "HDProSearch"
             btn = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📢 Join Update Channel", url=f"https://t.me/{channel_username}")]
             ])
@@ -40,10 +37,10 @@ async def start_handler(client, message):
 
     await message.reply(
         f"👋 Hello **{message.from_user.first_name}**!\n\n"
-        "Main iPapkorn style Auto-Filter Bot hoon. Mujhe kisi bhi Movie ya Series ka naam bhejo, main aapko turant file dunga! 🚀"
+        "Main **iPapkorn style** Auto-Filter Bot hoon. Mujhe kisi bhi Movie ya Series ka naam bhejo, main aapko turant file dunga! 🚀"
     )
 
-@app.on_message(filters.text & filters.private & ~filters.command(["start"]))
+@app.on_message(filters.text & filters.private & ~filters.command(["start", "help"]))
 async def auto_filter(client, message):
     query = message.text.strip()
     if len(query) < 2:
@@ -60,7 +57,8 @@ async def auto_filter(client, message):
     buttons = []
     
     for file in files:
-        buttons.append([InlineKeyboardButton(file['file_name'], callback_data=f"file_{file['file_id'][:10]}🌿")])
+        # File list buttons
+        buttons.append([InlineKeyboardButton(file['file_name'], callback_data=f"file_{file['file_id'][:10]}")])
 
     await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -76,12 +74,8 @@ async def inline_search(client, inline_query):
                 InlineQueryResultCachedDocument(
                     title=file['file_name'],
                     file_id=file['file_id'],
-                    caption=f"📁 **{file['file_name']}**\n\n✨ Shared via Bot",
+                    caption=f"📁 **{file['file_name']}**\n\n✨ Shared via HDPro Search Bot",
                 )
             )
             
     await inline_query.answer(results, cache_time=1)
-
-if __name__ == "__main__":
-    print("Bot is starting with Turso DB support...")
-    app.run()
