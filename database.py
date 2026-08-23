@@ -47,15 +47,12 @@ async def init_db():
 # --- 2. DATABASE STATISTICS ---
 # Total files, total users aur banned users ka count nikalne ke liye
 async def get_db_stats():
-    # Total indexed files count
     res_files = await client.execute("SELECT COUNT(*) FROM files;")
     total_files = res_files.rows[0][0] if res_files.rows else 0
     
-    # Total bot users count
     res_users = await client.execute("SELECT COUNT(*) FROM users;")
     total_users = res_users.rows[0][0] if res_users.rows else 0
     
-    # Ban kiye gaye users ka count
     res_banned = await client.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1;")
     banned_users = res_banned.rows[0][0] if res_banned.rows else 0
     
@@ -69,35 +66,30 @@ async def get_db_stats():
 
 # --- 3. USER MANAGEMENT (BAN / UNBAN / BROADCAST) ---
 
-# Naye user ko database me insert karta hai (Duplicate hone par ignore karega)
 async def add_user(user_id: int):
     await client.execute(
         "INSERT INTO users (user_id, is_banned) VALUES (?, 0) ON CONFLICT(user_id) DO NOTHING;",
         [user_id]
     )
 
-# User ko ban mark karta hai (is_banned = 1)
 async def ban_user(user_id: int):
     await client.execute(
         "INSERT INTO users (user_id, is_banned) VALUES (?, 1) ON CONFLICT(user_id) DO UPDATE SET is_banned = 1;",
         [user_id]
     )
 
-# User ko unban karta hai (is_banned = 0)
 async def unban_user(user_id: int):
     await client.execute(
         "UPDATE users SET is_banned = 0 WHERE user_id = ?;",
         [user_id]
     )
 
-# Check karta hai ki user banned hai ya nahi
 async def is_user_banned(user_id: int) -> bool:
     res = await client.execute("SELECT is_banned FROM users WHERE user_id = ?;", [user_id])
     if res.rows:
         return bool(res.rows[0][0])
     return False
 
-# Broadcast ke liye sabhi active (unbanned) users ki IDs fetch karta hai
 async def get_all_users():
     res = await client.execute("SELECT user_id FROM users WHERE is_banned = 0;")
     return [r[0] for r in res.rows] if res.rows else []
@@ -105,18 +97,27 @@ async def get_all_users():
 
 # --- 4. FILE STORAGE & SEARCH OPERATIONS ---
 
-# Nayi file ko database me save karta hai (Duplicate file_id ko ignore karega)
+# Nayi file save karta hai (Double file_id ya Same Name + Size dono duplicate ko skip karega)
 async def save_file(file_id: str, file_name: str, file_size: int, caption: str = "") -> bool:
     try:
+        # Check duplicate by file_id OR exact (file_name + file_size)
+        check = await client.execute(
+            "SELECT id FROM files WHERE file_id = ? OR (file_name = ? AND file_size = ?);",
+            [file_id, file_name, file_size]
+        )
+        if check.rows:
+            return False  # Duplicate found, skip saving
+        
         res = await client.execute(
-            "INSERT OR IGNORE INTO files (file_id, file_name, file_size, caption) VALUES (?, ?, ?, ?);",
-            [file_id, file_name.lower(), file_size, caption]
+            "INSERT INTO files (file_id, file_name, file_size, caption) VALUES (?, ?, ?, ?);",
+            [file_id, file_name, file_size, caption]
         )
         return res.rows_affected > 0
-    except Exception:
+    except Exception as e:
+        print(f"[Save File Error]: {e}", flush=True)
         return False
 
-# Primary Key (id) ke basis par single file ka metadata nikalta hai (Deep-link download ke liye)
+# Primary Key (id) ke basis par single file metadata fetch karta hai
 async def get_file_by_id(db_id: str):
     try:
         res = await client.execute("SELECT id, file_id, file_name, file_size, caption FROM files WHERE id = ?;", [int(db_id)])
@@ -133,15 +134,14 @@ async def get_file_by_id(db_id: str):
         pass
     return None
 
-# User search query ke mutabik files fetch karta hai (Pagination: LIMIT aur OFFSET ke sath)
+# User search query ke mutabik files fetch karta hai (LIMIT aur OFFSET ke sath)
 async def search_files(query: str, offset: int = 0, limit: int = 10):
-    # Query ke words ko split karke '%word1%word2%' pattern banata hai taaki flexible matching ho sake
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
     
     res = await client.execute(
         "SELECT id, file_id, file_name, file_size, caption FROM files WHERE file_name LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?;",
-        [like_pattern.lower(), limit, offset]
+        [like_pattern, limit, offset]
     )
     
     results = []
@@ -155,20 +155,20 @@ async def search_files(query: str, offset: int = 0, limit: int = 10):
         })
     return results
 
-# Search results ke total matching files count karta hai taaki total pages calculate ho sakein
+# Total matching files count karta hai pagination ke liye
 async def count_files(query: str) -> int:
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
     res = await client.execute(
         "SELECT COUNT(*) FROM files WHERE file_name LIKE ?;",
-        [like_pattern.lower()]
+        [like_pattern]
     )
     return res.rows[0][0] if res.rows else 0
 
 
 # --- 5. FILE DELETION OPERATIONS ---
 
-# Single file ko file_id ya file_name ke zariye delete karta hai
+# Single file delete karta hai
 async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
     if file_id:
         res = await client.execute("DELETE FROM files WHERE file_id = ?;", [file_id])
@@ -176,13 +176,24 @@ async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
     elif file_name:
         words = file_name.strip().split()
         like_pattern = "%" + "%".join(words) + "%"
-        res = await client.execute("DELETE FROM files WHERE id IN (SELECT id FROM files WHERE file_name LIKE ? LIMIT 1);", [like_pattern.lower()])
+        res = await client.execute("DELETE FROM files WHERE id IN (SELECT id FROM files WHERE file_name LIKE ? LIMIT 1);", [like_pattern])
         return res.rows_affected
     return 0
 
-# Ek hi naam/series ki saari matching files ko batch me delete karta hai
+# Series / movie ki matching files delete karta hai
 async def delete_files_by_name(query: str) -> int:
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
-    res = await client.execute("DELETE FROM files WHERE file_name LIKE ?;", [like_pattern.lower()])
+    res = await client.execute("DELETE FROM files WHERE file_name LIKE ?;", [like_pattern])
     return res.rows_affected
+
+# Poori database files clear karne ka function
+async def clear_all_files() -> int:
+    try:
+        count_res = await client.execute("SELECT COUNT(*) FROM files;")
+        total = count_res.rows[0][0] if count_res.rows else 0
+        await client.execute("DELETE FROM files;")
+        return total
+    except Exception as e:
+        print(f"[Clear DB Error]: {e}", flush=True)
+        return 0
