@@ -47,12 +47,12 @@ async def start_handler(client: Client, message: Message):
         ]
         return await message.reply_text(FSUB_TXT, reply_markup=InlineKeyboardMarkup(btn))
 
-    # File delivery deep link
-    if len(message.command) > 1:
-        file_id = message.command[1]
-        file_data = await db.get_file(file_id)
+    # Deep Link Handler (Agar ID pass ho /start <db_id>)
+    if len(message.command) > 1 and message.command[1].isdigit():
+        db_id = int(message.command[1])
+        file_data = await db.get_file_by_id(db_id)
         if file_data:
-            _, file_name, file_size, caption = file_data
+            file_id, file_name, file_size, caption = file_data
             caption_text = FILE_CAPTION_TXT.format(
                 file_name=file_name,
                 file_size=get_readable_size(file_size)
@@ -66,8 +66,7 @@ async def start_handler(client: Client, message: Message):
             return await message.reply_text("❌ Yeh file database me exist nahi karti ya delete ho chuki hai.")
 
     buttons = [
-        [InlineKeyboardButton("ℹ️ About", callback_data="about_bot")],
-        [InlineKeyboardButton("🔍 Search Here", switch_inline_query_current_chat="")]
+        [InlineKeyboardButton("ℹ️ About", callback_data="about_bot")]
     ]
     await message.reply_text(
         START_TXT.format(mention=message.from_user.mention),
@@ -96,21 +95,22 @@ async def filter_search(client: Client, message: Message):
         return await message.reply_text("❌ **Koi file nahi mili!** Spelling check karke dobara search karein.")
 
     buttons = []
-    for f in files:
-        f_id, f_name, f_size = f[0], f[1], f[2]
+    for db_id, f_name, f_size in files:
         size_str = get_readable_size(f_size)
-        btn_text = f"[{size_str}] {f_name}"
-        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"getfile_{f_id}")])
+        # Button text limit safe (Max 45 chars for title)
+        short_name = (f_name[:40] + "..") if len(f_name) > 40 else f_name
+        btn_text = f"[{size_str}] {short_name}"
+        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"file_{db_id}")])
 
     if len(files) == 10:
-        buttons.append([InlineKeyboardButton("Next Page ➡️", callback_data=f"next_{query}_10")])
+        buttons.append([InlineKeyboardButton("Next Page ➡️", callback_data=f"next_{query[:20]}_10")])
 
     await message.reply_text(
         f"🔍 Results for: **{query}**",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# Callback Queries
+# Callback Queries Handler
 @bot.on_callback_query()
 async def callback_handler(client: Client, query: CallbackQuery):
     data = query.data
@@ -123,21 +123,20 @@ async def callback_handler(client: Client, query: CallbackQuery):
 
     elif data == "back_home":
         buttons = [
-            [InlineKeyboardButton("ℹ️ About", callback_data="about_bot")],
-            [InlineKeyboardButton("🔍 Search Here", switch_inline_query_current_chat="")]
+            [InlineKeyboardButton("ℹ️ About", callback_data="about_bot")]
         ]
         return await query.message.edit_text(
             START_TXT.format(mention=query.from_user.mention),
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-    elif data.startswith("getfile_"):
-        file_id = data.split("_", 1)[1]
-        file_data = await db.get_file(file_id)
+    elif data.startswith("file_"):
+        db_id = data.split("_", 1)[1]
+        file_data = await db.get_file_by_id(db_id)
         if not file_data:
             return await query.answer("File exist nahi karti!", show_alert=True)
 
-        _, file_name, file_size, _ = file_data
+        file_id, file_name, file_size, _ = file_data
         caption_text = FILE_CAPTION_TXT.format(
             file_name=file_name,
             file_size=get_readable_size(file_size)
@@ -158,10 +157,10 @@ async def callback_handler(client: Client, query: CallbackQuery):
             return await query.answer("Aur files available nahi hain!", show_alert=True)
 
         buttons = []
-        for f in files:
-            f_id, f_name, f_size = f[0], f[1], f[2]
+        for db_id, f_name, f_size in files:
             size_str = get_readable_size(f_size)
-            buttons.append([InlineKeyboardButton(f"[{size_str}] {f_name}", callback_data=f"getfile_{f_id}")])
+            short_name = (f_name[:40] + "..") if len(f_name) > 40 else f_name
+            buttons.append([InlineKeyboardButton(f"[{size_str}] {short_name}", callback_data=f"file_{db_id}")])
 
         nav = []
         if offset >= 10:
