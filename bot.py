@@ -111,7 +111,36 @@ async def stats_handler(client: Client, message: Message):
     )
     await message.reply_text(text)
 
-# --- 2. PRIVATE CHANNEL POST URL/RANGE INDEXER ---
+# --- 2. FORWARD DETECTOR (PRIVATE CHANNELS) ---
+@bot.on_message(filters.forwarded & filters.private)
+async def forward_channel_detector(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not message.forward_from_chat:
+        return await message.reply_text("⚠️ Ye message kisi channel ka nahi hai.")
+
+    fwd_chat = message.forward_from_chat
+    last_msg_id = message.forward_from_message_id
+
+    btn = [[
+        InlineKeyboardButton(
+            "⚡ Index All Files Now", 
+            callback_data=f"idx_{fwd_chat.id}_{last_msg_id}"
+        )
+    ]]
+
+    await message.reply_text(
+        f"📥 **Private Channel Detected!**\n\n"
+        f"📢 **Channel Title:** `{fwd_chat.title}`\n"
+        f"🆔 **Channel ID:** `{fwd_chat.id}`\n"
+        f"🔢 **Forwarded Message ID:** `{last_msg_id}`\n\n"
+        f"👉 _Niche button dabayein ya command use karein:_\n"
+        f"`/index {fwd_chat.id}`",
+        reply_markup=InlineKeyboardMarkup(btn)
+    )
+
+# --- 3. BATCH & LINK INDEX COMMAND ---
 @bot.on_message(filters.command("index") & filters.private)
 async def batch_index_url(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -120,67 +149,156 @@ async def batch_index_url(client: Client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
             "⚠️ **Private Channel Indexing Guide:**\n\n"
-            "👉 **Single Post Link:** `/index https://t.me/c/1234567890/50`\n"
+            "👉 **Forward Method:** Channel se bot ko 1 message forward karein.\n"
+            "👉 **Full Channel:** `/index -1001234567890`\n"
             "👉 **Range Link:** `/index https://t.me/c/1234567890/10-50`\n\n"
-            "*(Bot ka private channel me added aur admin hona zaroori hai)*"
+            "*(Bot ka private channel me admin hona zaroori hai)*"
         )
 
-    link = message.command[1].strip()
-    match = re.match(r"(?:https?://)?(?:www\.)?t\.me/c/(\d+)/(\d+)(?:-(\d+))?", link)
-    if not match:
-        return await message.reply_text("❌ Galat private channel link format! Example: `https://t.me/c/123456789/10-50`")
+    arg = message.command[1].strip()
+    channel_id = None
+    start_id = 1
+    end_id = None
 
-    channel_id = int(f"-100{match.group(1)}")
-    start_id = int(match.group(2))
-    end_id = int(match.group(3)) if match.group(3) else start_id
+    match = re.match(r"(?:https?://)?(?:www\.)?t\.me/c/(\d+)/(\d+)(?:-(\d+))?", arg)
+    if match:
+        channel_id = int(f"-100{match.group(1)}")
+        start_id = int(match.group(2))
+        end_id = int(match.group(3)) if match.group(3) else start_id
+    else:
+        try:
+            channel_id = int(arg)
+            if len(message.command) > 2:
+                start_id = int(message.command[2])
+            if len(message.command) > 3:
+                end_id = int(message.command[3])
+        except ValueError:
+            return await message.reply_text("❌ Galat format! Channel ID numeric honi chahiye.")
 
-    if start_id > end_id:
-        start_id, end_id = end_id, start_id
+    await run_indexing_task(client, message.chat.id, channel_id, start_id, end_id)
 
-    total_msgs = (end_id - start_id) + 1
-    status_msg = await message.reply_text(f"⏳ **Indexing start ho rahi hai...**\nTotal Messages: `{total_msgs}`")
+async def run_indexing_task(client: Client, chat_id: int, channel_id: int, start_id: int = 1, end_id: int = None):
+    try:
+        chat = await client.get_chat(channel_id)
+    except Exception as e:
+        return await client.send_message(
+            chat_id, 
+            f"❌ **Error:** Bot channel me access nahi kar pa raha hai. Admin privileges check karein.\n`{e}`"
+        )
+
+    status_msg = await client.send_message(
+        chat_id, 
+        f"⏳ **Indexing Started for:** `{chat.title}`\n🆔 `{channel_id}`..."
+    )
 
     indexed_count = 0
     skipped_count = 0
+    total_scanned = 0
 
-    for current_id in range(start_id, end_id + 1):
-        try:
-            msg = await client.get_messages(chat_id=channel_id, message_ids=current_id)
-            if msg and (msg.document or msg.video or msg.audio):
-                media = msg.document or msg.video or msg.audio
-                file_name = getattr(media, "file_name", None) or msg.caption or "Unknown"
-                saved = await db.save_file(
-                    file_id=media.file_id,
-                    file_name=file_name,
-                    file_size=media.file_size,
-                    caption=msg.caption or ""
-                )
-                if saved:
-                    indexed_count += 1
-                else:
-                    skipped_count += 1
-            else:
-                skipped_count += 1
+    try:
+        # End id provided hone par range scan
+        if end_id:
+            if start_id > end_id:
+                start_id, end_id = end_id, start_id
+            for current_id in range(start_id, end_id + 1):
+                try:
+                    msg = await client.get_messages(chat_id=channel_id, message_ids=current_id)
+                    total_scanned += 1
+                    if msg and (msg.document or msg.video or msg.audio):
+                        media = msg.document or msg.video or msg.audio
+                        file_name = getattr(media, "file_name", None) or msg.caption or f"file_{msg.id}"
+                        saved = await db.save_file(
+                            file_id=media.file_id,
+                            file_name=file_name,
+                            file_size=media.file_size,
+                            caption=msg.caption or "",
+                            channel_id=channel_id,
+                            message_id=msg.id
+                        )
+                        if saved:
+                            indexed_count += 1
+                        else:
+                            skipped_count += 1
+                    else:
+                        skipped_count += 1
 
-            if (current_id - start_id + 1) % 20 == 0:
-                await status_msg.edit_text(
-                    f"⏳ **Indexing In Progress...**\n\n"
-                    f"Processed: `{current_id - start_id + 1}/{total_msgs}`\n"
-                    f"✅ Indexed: `{indexed_count}`\n"
-                    f"⏩ Skipped/Duplicate: `{skipped_count}`"
-                )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-        except Exception as e:
-            print(f"[Index Loop Error]: {e}", flush=True)
+                    if total_scanned % 25 == 0:
+                        await status_msg.edit_text(
+                            f"⏳ **Indexing In Progress...**\n\n"
+                            f"📂 Channel: `{chat.title}`\n"
+                            f"🔍 Checked: `{total_scanned}`\n"
+                            f"✅ Saved: `{indexed_count}`\n"
+                            f"⏩ Duplicates: `{skipped_count}`"
+                        )
+                        await asyncio.sleep(0.5)
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                except Exception:
+                    pass
+        else:
+            # Full Channel Crawl
+            async for msg in client.get_chat_history(channel_id):
+                total_scanned += 1
+                if msg and (msg.document or msg.video or msg.audio):
+                    media = msg.document or msg.video or msg.audio
+                    file_name = getattr(media, "file_name", None) or msg.caption or f"file_{msg.id}"
+                    saved = await db.save_file(
+                        file_id=media.file_id,
+                        file_name=file_name,
+                        file_size=media.file_size,
+                        caption=msg.caption or "",
+                        channel_id=channel_id,
+                        message_id=msg.id
+                    )
+                    if saved:
+                        indexed_count += 1
+                    else:
+                        skipped_count += 1
+
+                if total_scanned % 30 == 0:
+                    try:
+                        await status_msg.edit_text(
+                            f"⚡ **Indexing Channel History...**\n\n"
+                            f"📂 Channel: `{chat.title}`\n"
+                            f"🔍 Scanned: `{total_scanned}`\n"
+                            f"✅ Saved: `{indexed_count}`\n"
+                            f"⏩ Duplicates: `{skipped_count}`"
+                        )
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+    except Exception as e:
+        print(f"[Index Loop Error]: {e}", flush=True)
 
     await status_msg.edit_text(
         f"🎉 **Indexing Complete!**\n\n"
-        f"✅ **Total Indexed:** `{indexed_count}`\n"
-        f"⏩ **Skipped/Duplicate:** `{skipped_count}`"
+        f"📂 **Channel:** `{chat.title}`\n"
+        f"🔍 **Total Checked:** `{total_scanned}`\n"
+        f"✅ **Saved in DB:** `{indexed_count}`\n"
+        f"⏩ **Duplicates/Skipped:** `{skipped_count}`"
     )
 
-# --- 3. GROUP WELCOME EVENTS ---
+# --- 4. LIVE AUTO-INDEX IN ANY CHANNEL WHERE BOT IS ADMIN ---
+@bot.on_message(filters.channel & (filters.document | filters.video | filters.audio))
+async def live_auto_index(client: Client, message: Message):
+    media = message.document or message.video or message.audio
+    if not media:
+        return
+    file_name = getattr(media, "file_name", None) or message.caption or f"file_{message.id}"
+    await db.save_file(
+        file_id=media.file_id,
+        file_name=file_name,
+        file_size=media.file_size,
+        caption=message.caption or "",
+        channel_id=message.chat.id,
+        message_id=message.id
+    )
+    print(f"[LIVE INDEXED]: {file_name} from {message.chat.title}", flush=True)
+
+# --- 5. GROUP WELCOME EVENTS ---
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
@@ -192,7 +310,7 @@ async def group_welcome_handler(client: Client, message: Message):
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
             await message.reply_text(text=welcome_text, reply_markup=welcome_buttons, reply_to_message_id=message.id)
 
-# --- 4. ADMIN COMMANDS: BAN & UNBAN ---
+# --- 6. ADMIN COMMANDS: BAN & UNBAN ---
 @bot.on_message(filters.command("ban") & (filters.private | filters.group))
 async def ban_handler(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -233,7 +351,7 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- 5. ADMIN COMMANDS: DELETE & DELETEFILES ---
+# --- 7. ADMIN COMMANDS: DELETE & DELETEFILES ---
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -276,7 +394,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
-# --- 6. START COMMAND ---
+# --- 8. START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -334,22 +452,7 @@ async def start_handler(client: Client, message: Message):
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-# --- 7. AUTO INDEX IN DB CHANNEL ONLY ---
-@bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
-async def auto_index(client: Client, message: Message):
-    media = message.document or message.video or message.audio
-    if not media:
-        return
-    file_name = getattr(media, "file_name", None) or message.caption or "Unknown"
-    await db.save_file(
-        file_id=media.file_id,
-        file_name=file_name,
-        file_size=media.file_size,
-        caption=message.caption or ""
-    )
-    print(f"[INDEXED]: {file_name}", flush=True)
-
-# --- 8. SEARCH HANDLER ---
+# --- 9. SEARCH HANDLER ---
 @bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "support", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status", "index"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
@@ -399,14 +502,24 @@ async def filter_search(client: Client, message: Message):
 
     asyncio.create_task(auto_delete_and_warn(client, chat_id, search_msg.id, first_name, user_id, delay=270))
 
-# --- 9. CALLBACK ROUTER ---
+# --- 10. CALLBACK ROUTER ---
 @bot.on_callback_query()
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
     user_id = query.from_user.id
 
-    if data == "btn_search_guide":
+    if data.startswith("idx_"):
+        if not is_admin(user_id):
+            return await query.answer("⛔ Sirf Admins ye use kar sakte hain.", show_alert=True)
+        
+        parts = data.split("_")
+        ch_id = int(parts[1])
+        await query.answer("Indexing Started!")
+        await query.message.delete()
+        return await run_indexing_task(client, query.message.chat.id, ch_id)
+
+    elif data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
         guide_msg = await query.message.reply_text(text=guide_text)
@@ -429,7 +542,6 @@ async def callback_router(client: Client, query: CallbackQuery):
             )
             asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=240))
         except Exception:
-            # Agar user ne PM me bot start na kiya ho
             await query.answer(f"Pehle bot ke PM me @{client.me.username} ko /start karein.", show_alert=True)
         return
 
