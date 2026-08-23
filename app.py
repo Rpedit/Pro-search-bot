@@ -1,20 +1,24 @@
-import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from bot import bot
 from database import db
 
-app = FastAPI()
-
-@app.on_event("startup")
-async def start_services():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Database & Bot init
     await db.connect()
     await bot.start()
-    print("🚀 Bot and Database Started Successfully via FastAPI!")
-
-@app.on_event("shutdown")
-async def stop_services():
+    print("🚀 Bot & Turso DB Started Successfully!")
+    yield
+    # Shutdown
     await bot.stop()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 def home():
-    return {"status": "running", "bot": "HD Pro Search"}
+    return {"status": "running", "service": "HD Pro Search Bot"}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
