@@ -200,6 +200,7 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
+# Poori Database Clear Karne Ka Command (/clearall)
 @bot.on_message(filters.command(["clearall", "flushdb", "cleardb"]) & filters.private)
 async def clear_db_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -216,7 +217,7 @@ async def clear_db_cmd(client: Client, message: Message):
         reply_markup=confirm_markup
     )
 
-# --- 6. START COMMAND & DEEP-LINK FILE DELIVERY ---
+# --- 6. START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -243,20 +244,6 @@ async def start_handler(client: Client, message: Message):
                 reply_markup=buttons,
                 reply_to_message_id=message.id
             )
-
-    # Deep-link delivery
-    if len(message.command) > 1 and message.command[1].startswith("file_"):
-        db_id = message.command[1].replace("file_", "")
-        file_data = await db.get_file_by_id(db_id)
-        if file_data:
-            caption_text = ui.get_file_caption(file_data["file_name"])
-            sent_msg = await client.send_cached_media(
-                chat_id=user_id,
-                file_id=file_data["file_id"],
-                caption=caption_text
-            )
-            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
-            return
 
     caption_text = ui.get_start_text(first_name)
     markup = ui.get_start_buttons(client.me.username)
@@ -349,10 +336,29 @@ async def callback_router(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name or "User"
     user_id = query.from_user.id
 
+    # Broadcast
     if data.startswith("bcast_"):
         await handle_broadcast_callback(client, query)
         return
 
+    # Direct File Click (Clean Callback Delivery)
+    elif data.startswith("getfile_"):
+        db_id = data.replace("getfile_", "")
+        file_data = await db.get_file_by_id(db_id)
+        if file_data:
+            caption_text = ui.get_file_caption(file_data["file_name"])
+            sent_msg = await client.send_cached_media(
+                chat_id=user_id,
+                file_id=file_data["file_id"],
+                caption=caption_text
+            )
+            await query.answer("Sending file...")
+            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
+        else:
+            await query.answer("⚠️ File not found!", show_alert=True)
+        return
+
+    # Clear DB Confirmations
     elif data == "confirm_clear_all_db":
         if not is_admin(query.from_user.id):
             return await query.answer("⛔ Access Denied!", show_alert=True)
@@ -375,6 +381,7 @@ async def callback_router(client: Client, query: CallbackQuery):
         asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
         return
 
+    # Pagination navigation
     elif data.startswith("page_"):
         try:
             _, query_id, page_str = data.split("_")
