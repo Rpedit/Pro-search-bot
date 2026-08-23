@@ -59,7 +59,6 @@ def get_no_results_text() -> str:
         "● **Also ask [movie name, language] like this...**"
     )
 
-# --- MISSING FUNCTION ADDED ---
 def get_no_results_buttons() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("🔍 How To Search 🔍", callback_data="btn_search_guide")]
@@ -108,14 +107,13 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
         "**IF YOU WANT THAT FILE, REQUEST AGAIN ❤️**"
     )
 
-# --- 3-BUTTON PAGINATION ROW ---
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
     # Header Button
     buttons.append([InlineKeyboardButton(f"🎬 {query_title[:28]} 🎬", callback_data="header_click")])
     
-    # File list buttons (Arrow remove karne ke liye callback_data use kiya hai)
+    # File list buttons
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
