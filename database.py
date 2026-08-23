@@ -58,63 +58,82 @@ class Database:
             return False
 
     async def search_files(self, query_text, limit=10, offset=0):
-        # Clean query tokens
         clean_text = "".join([c if c.isalnum() else " " for c in query_text])
         tokens = [w.strip().lower() for w in clean_text.split() if w.strip()]
-
+        
         if not tokens:
             return []
 
-        # Build SQL condition matching file_name and caption
-        conditions = []
-        params = []
-        for token in tokens:
-            conditions.append("(LOWER(file_name) LIKE ? OR LOWER(caption) LIKE ?)")
-            params.extend([f"%{token}%", f"%{token}%"])
+        # Try searching across multiple possible column names (file_name, name, title, caption)
+        queries_to_try = [
+            ("file_name", "caption"),
+            ("name", "title"),
+            ("file_name", "file_id"),
+        ]
 
-        where_clause = " AND ".join(conditions)
-        query = f"SELECT id, file_id, file_name, file_size FROM files WHERE {where_clause} LIMIT ? OFFSET ?"
-        params.extend([int(limit), int(offset)])
+        for col1, col2 in queries_to_try:
+            try:
+                conditions = []
+                params = []
+                for token in tokens:
+                    conditions.append(f"(LOWER(COALESCE({col1}, '')) LIKE ? OR LOWER(COALESCE({col2}, '')) LIKE ?)")
+                    params.extend([f"%{token}%", f"%{token}%"])
 
-        try:
-            res = await self.client.execute(query, params)
-            output = []
-            for row in res.rows:
-                if isinstance(row, (list, tuple)):
-                    row_id = row[0]
-                    f_name = row[2] or "Unknown File"
-                    f_size = row[3] or 0
-                else:
-                    row_id = row.get("id") or 1
-                    f_name = row.get("file_name") or row.get("caption") or "Unknown File"
-                    f_size = row.get("file_size") or 0
-                output.append((row_id, f_name, f_size))
-            return output
-        except Exception as e:
-            print(f"[DB SEARCH ERROR] -> {e}")
-            return []
+                where_clause = " AND ".join(conditions)
+                # Flexible columns selection using rowid or id
+                query = f"SELECT id, file_id, COALESCE({col1}, 'File'), COALESCE(file_size, 0) FROM files WHERE {where_clause} LIMIT ? OFFSET ?"
+                params.extend([int(limit), int(offset)])
+
+                res = await self.client.execute(query, params)
+                output = []
+                for row in res.rows:
+                    if isinstance(row, (list, tuple)):
+                        row_id = row[0]
+                        f_name = row[2] or "Unknown File"
+                        f_size = row[3] or 0
+                    else:
+                        row_id = row.get("id") or 1
+                        f_name = row.get(col1) or "Unknown File"
+                        f_size = row.get("file_size") or 0
+                    output.append((row_id, f_name, f_size))
+                
+                if output:
+                    return output
+            except Exception:
+                continue
+
+        return []
 
     async def get_file_by_id(self, db_id):
-        query = "SELECT file_id, file_name, file_size, caption FROM files WHERE id = ? LIMIT 1"
-        try:
-            res = await self.client.execute(query, [int(db_id)])
-            if res.rows:
-                row = res.rows[0]
-                if isinstance(row, (list, tuple)):
-                    return {
-                        "file_id": row[0],
-                        "file_name": row[1],
-                        "file_size": row[2],
-                        "caption": row[3]
-                    }
-                return {
-                    "file_id": row.get("file_id"),
-                    "file_name": row.get("file_name"),
-                    "file_size": row.get("file_size"),
-                    "caption": row.get("caption")
-                }
-        except Exception as e:
-            print(f"[DB GET ERROR] -> {e}")
+        # Try fetching using id or rowid
+        for id_col in ["id", "rowid"]:
+            try:
+                query = f"SELECT file_id, file_name, file_size, caption FROM files WHERE {id_col} = ? LIMIT 1"
+                res = await self.client.execute(query, [int(db_id)])
+                if res.rows:
+                    row = res.rows[0]
+                    if isinstance(row, (list, tuple)):
+                        return {
+                            "file_id": row[0],
+                            "file_name": row[1] if len(row) > 1 else "File",
+                            "file_size": row[2] if len(row) > 2 else 0,
+                            "caption": row[3] if len(row) > 3 else ""
+                        }
+            except Exception:
+                try:
+                    # Fallback for 'name' column instead of 'file_name'
+                    query = f"SELECT file_id, name, file_size FROM files WHERE {id_col} = ? LIMIT 1"
+                    res = await self.client.execute(query, [int(db_id)])
+                    if res.rows:
+                        row = res.rows[0]
+                        return {
+                            "file_id": row[0],
+                            "file_name": row[1],
+                            "file_size": row[2] if len(row) > 2 else 0,
+                            "caption": ""
+                        }
+                except Exception:
+                    continue
         return None
 
     async def count_all_files(self):
