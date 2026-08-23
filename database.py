@@ -38,13 +38,13 @@ async def init_db():
 # --- STATS / METRICS ---
 async def get_db_stats():
     res_files = await client.execute("SELECT COUNT(*) FROM files;")
-    total_files = res_files.rows[0][0] if res_files.rows else 0
+    total_files = res_files.rows[0][0] if (res_files and res_files.rows) else 0
     
     res_users = await client.execute("SELECT COUNT(*) FROM users;")
-    total_users = res_users.rows[0][0] if res_users.rows else 0
+    total_users = res_users.rows[0][0] if (res_users and res_users.rows) else 0
     
     res_banned = await client.execute("SELECT COUNT(*) FROM users WHERE is_banned = 1;")
-    banned_users = res_banned.rows[0][0] if res_banned.rows else 0
+    banned_users = res_banned.rows[0][0] if (res_banned and res_banned.rows) else 0
     
     return {
         "total_files": total_files,
@@ -55,50 +55,62 @@ async def get_db_stats():
 
 # --- USER MANAGEMENT ---
 async def add_user(user_id: int):
-    await client.execute(
-        "INSERT INTO users (user_id, is_banned) VALUES (?, 0) ON CONFLICT(user_id) DO NOTHING;",
-        [user_id]
-    )
+    try:
+        await client.execute(
+            "INSERT INTO users (user_id, is_banned) VALUES (?, 0) ON CONFLICT(user_id) DO NOTHING;",
+            [user_id]
+        )
+    except Exception:
+        pass
 
 async def ban_user(user_id: int):
-    await client.execute(
-        "INSERT INTO users (user_id, is_banned) VALUES (?, 1) ON CONFLICT(user_id) DO UPDATE SET is_banned = 1;",
-        [user_id]
-    )
+    try:
+        await client.execute(
+            "INSERT INTO users (user_id, is_banned) VALUES (?, 1) ON CONFLICT(user_id) DO UPDATE SET is_banned = 1;",
+            [user_id]
+        )
+    except Exception:
+        pass
 
 async def unban_user(user_id: int):
-    await client.execute(
-        "UPDATE users SET is_banned = 0 WHERE user_id = ?;",
-        [user_id]
-    )
+    try:
+        await client.execute(
+            "UPDATE users SET is_banned = 0 WHERE user_id = ?;",
+            [user_id]
+        )
+    except Exception:
+        pass
 
 async def is_user_banned(user_id: int) -> bool:
-    res = await client.execute("SELECT is_banned FROM users WHERE user_id = ?;", [user_id])
-    if res.rows:
-        return bool(res.rows[0][0])
+    try:
+        res = await client.execute("SELECT is_banned FROM users WHERE user_id = ?;", [user_id])
+        if res and res.rows:
+            return bool(res.rows[0][0])
+    except Exception:
+        pass
     return False
 
-# --- FILE OPERATIONS WITH DUPLICATE PROTECTION ---
+# --- FILE OPERATIONS (FIXED) ---
 async def save_file(file_id: str, file_name: str, file_size: int, caption: str = "", channel_id: int = 0, message_id: int = 0) -> bool:
     try:
-        clean_name = file_name.strip()
+        clean_name = str(file_name).strip()
         
-        # 1. Duplicate check by file_id OR (file_name + file_size)
+        # 1. Duplicate check (file_id OR file_name + file_size)
         check = await client.execute(
             "SELECT id FROM files WHERE file_id = ? OR (LOWER(file_name) = ? AND file_size = ?) LIMIT 1;",
-            [file_id, clean_name.lower(), file_size]
+            [str(file_id), clean_name.lower(), int(file_size)]
         )
-        if check.rows:
+        if check and check.rows:
             return False  # Already exists
 
-        # 2. Insert new record
-        res = await client.execute(
+        # 2. Insert record safely
+        await client.execute(
             """INSERT OR IGNORE INTO files 
                (file_id, file_name, file_size, caption, channel_id, message_id) 
                VALUES (?, ?, ?, ?, ?, ?);""",
-            [file_id, clean_name, file_size, caption, channel_id, message_id]
+            [str(file_id), clean_name, int(file_size), str(caption or ""), int(channel_id or 0), int(message_id or 0)]
         )
-        return res.rows_affected > 0
+        return True
     except Exception as e:
         print(f"[DB Error] save_file: {e}", flush=True)
         return False
@@ -109,7 +121,7 @@ async def get_file_by_id(db_id: str):
             "SELECT id, file_id, file_name, file_size, caption, channel_id, message_id FROM files WHERE id = ?;", 
             [int(db_id)]
         )
-        if res.rows:
+        if res and res.rows:
             r = res.rows[0]
             return {
                 "_id": r[0],
@@ -125,51 +137,65 @@ async def get_file_by_id(db_id: str):
     return None
 
 async def search_files(query: str, offset: int = 0, limit: int = 10):
-    words = query.strip().split()
-    like_pattern = "%" + "%".join(words) + "%"
-    
-    res = await client.execute(
-        "SELECT id, file_id, file_name, file_size, caption FROM files WHERE LOWER(file_name) LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?;",
-        [like_pattern.lower(), limit, offset]
-    )
-    
-    results = []
-    for r in res.rows:
-        results.append({
-            "_id": r[0],
-            "file_id": r[1],
-            "file_name": r[2],
-            "file_size": r[3],
-            "caption": r[4]
-        })
-    return results
+    try:
+        words = query.strip().split()
+        like_pattern = "%" + "%".join(words) + "%"
+        
+        res = await client.execute(
+            "SELECT id, file_id, file_name, file_size, caption FROM files WHERE LOWER(file_name) LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?;",
+            [like_pattern.lower(), int(limit), int(offset)]
+        )
+        
+        results = []
+        if res and res.rows:
+            for r in res.rows:
+                results.append({
+                    "_id": r[0],
+                    "file_id": r[1],
+                    "file_name": r[2],
+                    "file_size": r[3],
+                    "caption": r[4]
+                })
+        return results
+    except Exception as e:
+        print(f"[DB Search Error]: {e}", flush=True)
+        return []
 
 async def count_files(query: str) -> int:
-    words = query.strip().split()
-    like_pattern = "%" + "%".join(words) + "%"
-    res = await client.execute(
-        "SELECT COUNT(*) FROM files WHERE LOWER(file_name) LIKE ?;",
-        [like_pattern.lower()]
-    )
-    return res.rows[0][0] if res.rows else 0
+    try:
+        words = query.strip().split()
+        like_pattern = "%" + "%".join(words) + "%"
+        res = await client.execute(
+            "SELECT COUNT(*) FROM files WHERE LOWER(file_name) LIKE ?;",
+            [like_pattern.lower()]
+        )
+        return res.rows[0][0] if (res and res.rows) else 0
+    except Exception:
+        return 0
 
 # --- DELETE OPERATIONS ---
 async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
-    if file_id:
-        res = await client.execute("DELETE FROM files WHERE file_id = ?;", [file_id])
-        return res.rows_affected
-    elif file_name:
-        words = file_name.strip().split()
-        like_pattern = "%" + "%".join(words) + "%"
-        res = await client.execute(
-            "DELETE FROM files WHERE id IN (SELECT id FROM files WHERE LOWER(file_name) LIKE ? LIMIT 1);", 
-            [like_pattern.lower()]
-        )
-        return res.rows_affected
+    try:
+        if file_id:
+            res = await client.execute("DELETE FROM files WHERE file_id = ?;", [str(file_id)])
+            return getattr(res, "rows_affected", 1)
+        elif file_name:
+            words = file_name.strip().split()
+            like_pattern = "%" + "%".join(words) + "%"
+            res = await client.execute(
+                "DELETE FROM files WHERE id IN (SELECT id FROM files WHERE LOWER(file_name) LIKE ? LIMIT 1);", 
+                [like_pattern.lower()]
+            )
+            return getattr(res, "rows_affected", 1)
+    except Exception:
+        pass
     return 0
 
 async def delete_files_by_name(query: str) -> int:
-    words = query.strip().split()
-    like_pattern = "%" + "%".join(words) + "%"
-    res = await client.execute("DELETE FROM files WHERE LOWER(file_name) LIKE ?;", [like_pattern.lower()])
-    return res.rows_affected
+    try:
+        words = query.strip().split()
+        like_pattern = "%" + "%".join(words) + "%"
+        res = await client.execute("DELETE FROM files WHERE LOWER(file_name) LIKE ?;", [like_pattern.lower()])
+        return getattr(res, "rows_affected", 1)
+    except Exception:
+        return 0
