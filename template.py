@@ -8,9 +8,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 START_PIC = "https://graph.org/file/246a70cb4387b59cceb15-9e968f8602a6acb36c.jpg"
 
-
-# --- WELCOME & GUIDE MESSAGES ---
-
 def get_start_text(first_name: str) -> str:
     return (
         f"Hey 👋 **{first_name}**🤩\n\n"
@@ -80,9 +77,6 @@ def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarku
     ]
     return InlineKeyboardMarkup(buttons)
 
-
-# --- FORMATTING & UTILITIES ---
-
 def humanbytes(size: int) -> str:
     if not size:
         return "0 B"
@@ -92,7 +86,6 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Clean Button Formatter (Full detail preserved for rotation)
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
     clean = re.sub(r"[\._+]", " ", file_name).strip()
@@ -109,7 +102,6 @@ def format_btn_name(file_name: str, file_size: int) -> str:
     clean_title = " ".join(words)
     return f"{size_str} • {clean_title}"
 
-# Search Caption (Matching Screenshot)
 def get_search_caption(first_name: str, user_id: int, query: str) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -120,7 +112,6 @@ def get_search_caption(first_name: str, user_id: int, query: str) -> str:
         "***Your Files is Ready Now***"
     )
 
-# File Caption (1 minute warning)
 def get_file_caption(raw_file_name: str) -> str:
     clean = re.sub(r"[\._+]", " ", raw_file_name).strip()
     words = []
@@ -138,7 +129,6 @@ def get_file_caption(raw_file_name: str) -> str:
         "**forward in another chat👉❌**"
     )
 
-# Copyright Deleted Alert (Screenshot)
 def get_deleted_alert_text(first_name: str, user_id: int) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -149,9 +139,6 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
         "❤️"
     )
 
-
-# --- SEARCH RESULT PAGINATION KEYBOARD ---
-
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
@@ -159,13 +146,13 @@ def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages
     formatted_header = query_title.title()[:28]
     buttons.append([InlineKeyboardButton(f"🎬 {formatted_header} 🎬", callback_data="header_click")])
     
-    # 2. File Buttons (Clean Callback without arrow icon)
+    # 2. File Buttons (Deep Link URL)
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
-        buttons.append([InlineKeyboardButton(btn_text, callback_data=f"getfile_{file_db_id}")])
+        buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # 3. Bottom Navigation Row
+    # 3. Navigation Row
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
