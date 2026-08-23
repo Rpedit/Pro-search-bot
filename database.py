@@ -7,17 +7,15 @@ class Database:
         self.auth_token = auth_token
 
     def get_client(self):
-        # libsql-client uses standard create_client
         return libsql_client.create_client(
             url=self.url,
             auth_token=self.auth_token
         )
 
     async def setup(self):
-        # Turso client calls are synchronous or handled via standard execution
         client = self.get_client()
         try:
-            client.execute("""
+            await client.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     file_id TEXT,
@@ -26,22 +24,22 @@ class Database:
                 )
             """)
         finally:
-            client.close()
+            await client.close()
 
     async def add_file(self, file_id, file_name, file_size):
         client = self.get_client()
         try:
-            client.execute(
+            await client.execute(
                 "INSERT INTO files (file_id, file_name, file_size) VALUES (?, ?, ?)",
                 [file_id, file_name, file_size]
             )
         finally:
-            client.close()
+            await client.close()
 
     async def search_files(self, query, max_results=10):
         client = self.get_client()
         try:
-            result = client.execute(
+            result = await client.execute(
                 "SELECT file_id, file_name, file_size FROM files WHERE file_name LIKE ? LIMIT ?",
                 [f"%{query}%", max_results]
             )
@@ -54,6 +52,6 @@ class Database:
                 })
             return files
         finally:
-            client.close()
+            await client.close()
 
 db = Database(TURSO_DB_URL, TURSO_AUTH_TOKEN)
