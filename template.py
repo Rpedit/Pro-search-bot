@@ -92,24 +92,21 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Clean Button Formatter (Full details for Landscape/Rotate)
+# Clean Button Formatter (Preserves full length for landscape mode)
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
-    
-    # Remove dots and underscores
     clean = re.sub(r"[\._+]", " ", file_name).strip()
     
-    # Standardize keywords uppercase / title case
-    formatted_words = []
+    words = []
     for w in clean.split():
         if re.match(r"^(1080p|720p|480p|2160p|4k|web|dl|web-dl|mkv|mp4|esub|hin|kor|eng|tam|tel|kan|mal|dual|uncut|org|hq|hdr|x264|x265|hevc)$", w, re.I):
-            formatted_words.append(w.upper())
+            words.append(w.upper())
         elif re.match(r"^(s\d{1,2}|e\d{1,2}|ep\d{1,2})$", w, re.I):
-            formatted_words.append(w.upper())
+            words.append(w.upper())
         else:
-            formatted_words.append(w.capitalize())
+            words.append(w.capitalize())
             
-    clean_title = " ".join(formatted_words)
+    clean_title = " ".join(words)
     return f"{size_str} • {clean_title}"
 
 # Search Caption (Matching Screenshot 1 & 2)
@@ -123,9 +120,8 @@ def get_search_caption(first_name: str, user_id: int, query: str) -> str:
         "***Your Files is Ready Now***"
     )
 
-# File Caption (Exact Screenshot 3 formatting)
+# File Caption (1 minute warning)
 def get_file_caption(raw_file_name: str) -> str:
-    # Clean up file name
     clean = re.sub(r"[\._+]", " ", raw_file_name).strip()
     words = []
     for w in clean.split():
@@ -142,7 +138,7 @@ def get_file_caption(raw_file_name: str) -> str:
         "**forward in another chat👉❌**"
     )
 
-# Auto delete alert text
+# Exact Copyright Deleted Alert (Screenshot 2)
 def get_deleted_alert_text(first_name: str, user_id: int) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -159,35 +155,35 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Header Button: 🎬 Title 🎬
+    # 1. Header Button: 🎬 Title 🎬
     formatted_header = query_title.title()[:28]
     buttons.append([InlineKeyboardButton(f"🎬 {formatted_header} 🎬", callback_data="header_click")])
     
-    # Matching File Buttons
+    # 2. Matching File Buttons
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Bottom Navigation Row matching Screenshot 1 & 2
+    # 3. Exact Navigation Row matching Screenshots
     bottom_row = []
     if total_pages <= 1:
-        bottom_row.append(InlineKeyboardButton("▫️ Pages", callback_data="pages_click"))
+        bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
     else:
-        # Page 1 par "▫️ Pages", Page 2+ par exact "◀️ Previous"
+        # Previous button
         if page > 1:
-            bottom_row.append(InlineKeyboardButton("◀️ Previous", callback_data=f"page_{query_id}_{page-1}"))
+            bottom_row.append(InlineKeyboardButton("⏪ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
-            bottom_row.append(InlineKeyboardButton("▫️ Pages", callback_data="pages_click"))
+            bottom_row.append(InlineKeyboardButton("■ Pages", callback_data="pages_click"))
         
-        # Middle Page Counter
+        # Counter button (Page 1: 1/2 | Page 2+: 2 / 2)
         if page == 1:
             bottom_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="pages_click"))
         else:
             bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
         
-        # Next Button
+        # Next button
         if page < total_pages:
             bottom_row.append(InlineKeyboardButton("Next ⏩", callback_data=f"page_{query_id}_{page+1}"))
             
