@@ -1,39 +1,39 @@
 import math
 
-def get_readable_size(size_bytes):
-    if not size_bytes:
+def format_file_size(size_bytes):
+    if not size_bytes or size_bytes <= 0:
         return "0 B"
-    size_name = ("B", "KB", "MB", "GB", "TB")
+    size_units = ("B", "KB", "MB", "GB", "TB")
     i = int(math.floor(math.log(size_bytes, 1024)))
     p = math.pow(1024, i)
     s = round(size_bytes / p, 2)
-    return f"{s} {size_name[i]}"
+    return f"{s} {size_units[i]}"
 
-START_TXT = """
-👋 **Hello {mention}**,
+START_MSG = """
+👋 **Namaste {user_mention}**,
 
 Welcome to **HD Pro Search Bot**! 🔍
 
-Main channel files ko index karta hoon aur aapke keywords ke hisab se exact file buttons provide karta hoon.
+Aap yahan direct movie ya file ka naam likh kar search kar sakte hain.
 """
 
-ABOUT_TXT = """
-🤖 **Bot Name:** HD Pro Search Bot
-⚡ **Framework:** Pyrogram & LibSQL (Turso)
-🌐 **Developer:** @RPEDITZ
+ABOUT_MSG = """
+🤖 **Bot:** HD Pro Search
+⚡ **Engine:** Pyrogram & Turso LibSQL
+👤 **Owner:** @RPEDITZ
 """
 
-FSUB_TXT = """
-⚠️ **Access Denied!**
+FSUB_MSG = """
+⚠️ **Channel Join Required!**
 
-Aapko search results ya files lene ke liye pehle hamara **Updates Channel** join karna padega. 
+Search results access karne ke liye kripya pehle hamara official channel join karein. 
 
-Join karne ke baad niche **Verify / Try Again** button par click karein.
+Join karne ke baad niche **🔄 Try Again** par click karein.
 """
 
-FILE_CAPTION_TXT = """
-📁 **File Name:** `{file_name}`
-📊 **Size:** `{file_size}`
+CAPTION_TEMPLATE = """
+🎬 **Title:** `{title}`
+📦 **Size:** `{size}`
 
 ⚡ *Powered by HD Pro Search*
 """
