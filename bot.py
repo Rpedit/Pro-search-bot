@@ -217,7 +217,7 @@ async def clear_db_cmd(client: Client, message: Message):
         reply_markup=confirm_markup
     )
 
-# --- 6. START COMMAND & FILE DELIVERY ---
+# --- 6. START COMMAND ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
@@ -245,21 +245,6 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Deliver file with clean warning caption
-    if len(message.command) > 1 and message.command[1].startswith("file_"):
-        db_id = message.command[1].replace("file_", "")
-        file_data = await db.get_file_by_id(db_id)
-        if file_data:
-            caption_text = ui.get_file_caption(file_data["file_name"])
-            sent_msg = await client.send_cached_media(
-                chat_id=user_id,
-                file_id=file_data["file_id"],
-                caption=caption_text
-            )
-            # Auto delete file after 60 seconds (1 minute)
-            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
-            return
-
     caption_text = ui.get_start_text(first_name)
     markup = ui.get_start_buttons(client.me.username)
 
@@ -276,7 +261,7 @@ async def start_handler(client: Client, message: Message):
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-# --- 7. AUTO INDEX IN DB CHANNEL (DUPLICATE FILTER) ---
+# --- 7. AUTO INDEX IN DB CHANNEL ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
@@ -333,7 +318,6 @@ async def filter_search(client: Client, message: Message):
     total_pages = math.ceil(total_results / 10)
     files = await db.search_files(query, offset=0, limit=10)
 
-    # Caption matching Screenshot 1 & 2
     caption_text = ui.get_search_caption(first_name, user_id, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
@@ -352,12 +336,29 @@ async def callback_router(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name or "User"
     user_id = query.from_user.id
 
-    # Broadcast confirmation callback
+    # Broadcast
     if data.startswith("bcast_"):
         await handle_broadcast_callback(client, query)
         return
 
-    # Clear All Database Confirmation
+    # Direct File Click (Clean Callback Delivery)
+    elif data.startswith("getfile_"):
+        db_id = data.replace("getfile_", "")
+        file_data = await db.get_file_by_id(db_id)
+        if file_data:
+            caption_text = ui.get_file_caption(file_data["file_name"])
+            sent_msg = await client.send_cached_media(
+                chat_id=user_id,
+                file_id=file_data["file_id"],
+                caption=caption_text
+            )
+            await query.answer("Sending file...")
+            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
+        else:
+            await query.answer("⚠️ File not found!", show_alert=True)
+        return
+
+    # Clear DB Confirmations
     elif data == "confirm_clear_all_db":
         if not is_admin(query.from_user.id):
             return await query.answer("⛔ Access Denied!", show_alert=True)
