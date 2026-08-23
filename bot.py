@@ -404,12 +404,33 @@ async def filter_search(client: Client, message: Message):
 async def callback_router(client: Client, query: CallbackQuery):
     data = query.data
     first_name = query.from_user.first_name or "User"
+    user_id = query.from_user.id
 
     if data == "btn_search_guide":
         await query.answer()
         guide_text = ui.get_search_guide_text()
         guide_msg = await query.message.reply_text(text=guide_text)
         asyncio.create_task(auto_delete_msg(client, query.message.chat.id, guide_msg.id, delay=86400))
+        return
+
+    elif data.startswith("file_"):
+        db_id = data.replace("file_", "")
+        file_data = await db.get_file_by_id(db_id)
+        if not file_data:
+            return await query.answer("❌ File database me nahi mili!", show_alert=True)
+            
+        await query.answer("Sending File...")
+        caption_text = ui.get_file_caption(file_data["file_name"])
+        try:
+            sent_msg = await client.send_cached_media(
+                chat_id=user_id,
+                file_id=file_data["file_id"],
+                caption=caption_text
+            )
+            asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=240))
+        except Exception:
+            # Agar user ne PM me bot start na kiya ho
+            await query.answer(f"Pehle bot ke PM me @{client.me.username} ko /start karein.", show_alert=True)
         return
 
     elif data.startswith("page_"):
