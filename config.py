@@ -17,7 +17,7 @@ raw_fsub = os.getenv("FSUB_CHANNEL", "-1002855667443").strip()
 if raw_fsub.lstrip("-").isdigit():
     FSUB_CHANNEL = int(raw_fsub)
 else:
-    FSUB_CHANNEL = raw_fsub.replace("https://t.me/", "").replace("@", "")
+    FSUB_CHANNEL = raw_fsub.replace("https://t.me/HDProSearch", "").replace("@", "")
 
 # Admin IDs
 ADMINS_RAW = os.getenv("ADMINS", "7067885693")
