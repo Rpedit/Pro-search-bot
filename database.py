@@ -31,7 +31,16 @@ class Database:
 
     async def save_file(self, media, caption=""):
         file_id = media.file_id
-        file_name = getattr(media, "file_name", "Unknown File")
+        
+        # Video/Audio me file_name None hota hai, isliye fallback caption ya default name
+        file_name = getattr(media, "file_name", None)
+        if not file_name:
+            if caption:
+                # Caption ki pehli line ko file name bana lo
+                file_name = caption.split("\n")[0][:100]
+            else:
+                file_name = f"File_{file_id[:8]}"
+
         file_size = getattr(media, "file_size", 0)
         file_type = media.file_type.name if hasattr(media, "file_type") else "DOCUMENT"
 
@@ -40,37 +49,48 @@ class Database:
         VALUES (?, ?, ?, ?, ?)
         """
         try:
-            await self.client.execute(query, [file_id, file_name, file_size, file_type, caption or ""])
+            await self.client.execute(query, [file_id, str(file_name), file_size, file_type, caption or ""])
             return True
         except Exception as e:
             print(f"Error saving file: {e}")
             return False
 
     async def search_files(self, search_text, limit=10, offset=0):
-        # Dots, underscores, hyphens, brackets ko space me convert karta hai
-        cleaned = re.sub(r"[\.\_\-\[\]\(\)\+]", " ", search_text)
-        words = [w.strip() for w in cleaned.split() if len(w.strip()) > 0]
+        # Clean text
+        raw_words = re.split(r"[\s\.\_\-\[\]\(\)\+]+", search_text.strip())
+        words = [w.lower() for w in raw_words if len(w) > 0]
         
         if not words:
             return []
 
-        # Har search word ke liye LIKE condition (case-insensitive)
-        conditions = " AND ".join(["LOWER(file_name) LIKE ?" for _ in words])
-        params = [f"%{w.lower()}%" for w in words]
+        # File name ya Caption dono me search karega
+        conditions = []
+        params = []
+        for w in words:
+            conditions.append("(LOWER(file_name) LIKE ? OR LOWER(caption) LIKE ?)")
+            params.extend([f"%{w}%", f"%{w}%"])
+
+        where_clause = " AND ".join(conditions)
         params.extend([limit, offset])
 
         query = f"""
         SELECT file_id, file_name, file_size FROM files
-        WHERE {conditions}
+        WHERE {where_clause}
         LIMIT ? OFFSET ?
         """
         try:
             res = await self.client.execute(query, params)
             results = []
             for row in res.rows:
-                f_id = row[0] if isinstance(row, (list, tuple)) else row["file_id"]
-                f_name = row[1] if isinstance(row, (list, tuple)) else row["file_name"]
-                f_size = row[2] if isinstance(row, (list, tuple)) else row["file_size"]
+                # Turso client row handling
+                if hasattr(row, "__getitem__"):
+                    f_id = row[0]
+                    f_name = row[1]
+                    f_size = row[2]
+                else:
+                    f_id = getattr(row, "file_id", "")
+                    f_name = getattr(row, "file_name", "")
+                    f_size = getattr(row, "file_size", 0)
                 results.append((f_id, f_name, f_size))
             return results
         except Exception as e:
@@ -83,11 +103,9 @@ class Database:
             res = await self.client.execute(query, [file_id])
             if res.rows:
                 row = res.rows[0]
-                f_id = row[0] if isinstance(row, (list, tuple)) else row["file_id"]
-                f_name = row[1] if isinstance(row, (list, tuple)) else row["file_name"]
-                f_size = row[2] if isinstance(row, (list, tuple)) else row["file_size"]
-                caption = row[3] if isinstance(row, (list, tuple)) else row["caption"]
-                return (f_id, f_name, f_size, caption)
+                if hasattr(row, "__getitem__"):
+                    return (row[0], row[1], row[2], row[3])
+                return (row.file_id, row.file_name, row.file_size, row.caption)
         except Exception as e:
             print(f"Get File Error: {e}")
         return None
@@ -96,9 +114,18 @@ class Database:
         try:
             res = await self.client.execute("SELECT COUNT(*) FROM files")
             if res.rows:
-                return res.rows[0][0] if isinstance(res.rows[0], (list, tuple)) else res.rows[0]["COUNT(*)"]
+                row = res.rows[0]
+                return row[0] if hasattr(row, "__getitem__") else getattr(row, "COUNT(*)", 0)
         except Exception as e:
             print(f"Total Files Count Error: {e}")
         return 0
+
+    # Temporary Debugging Function: Dekhne ke liye ki DB me save kya hua hai
+    async def get_sample_files(self):
+        try:
+            res = await self.client.execute("SELECT file_name, file_size FROM files LIMIT 5")
+            return [(r[0], r[1]) for r in res.rows]
+        except Exception:
+            return []
 
 db = Database()
