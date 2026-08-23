@@ -16,6 +16,7 @@ class Database:
             await self.init_db()
 
     async def init_db(self):
+        # Table create agar exist na kare
         query = """
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +59,7 @@ class Database:
         if not words:
             return []
 
-        # Sabhi possible text fields me case-insensitive wildcard search
+        # Multi-word LIKE matching
         conditions = []
         params = []
         for word in words:
@@ -73,11 +74,16 @@ class Database:
             res = await self.client.execute(query, params)
             results = []
             for row in res.rows:
-                # Row id (SQLite default rowid agar id missing ho)
-                r_id = row[0] if isinstance(row, (list, tuple)) else row.get("rowid", row.get("id", 1))
-                f_name = row[2] if isinstance(row, (list, tuple)) else row.get("file_name", "Unknown File")
-                f_size = row[3] if isinstance(row, (list, tuple)) else row.get("file_size", 0)
-                results.append((r_id, f_name, f_size))
+                # LibSQL Row tuple/dict safe access
+                if isinstance(row, (list, tuple)):
+                    r_id = row[0]
+                    f_name = row[2] if len(row) > 2 else "Movie File"
+                    f_size = row[3] if len(row) > 3 else 0
+                else:
+                    r_id = row.get("rowid") or row.get("id") or 1
+                    f_name = row.get("file_name") or row.get("caption") or "Movie File"
+                    f_size = row.get("file_size") or 0
+                results.append((r_id, str(f_name), int(f_size)))
             return results
         except Exception as e:
             print(f"Search Query Error: {e}")
