@@ -162,7 +162,7 @@ async def unban_handler(client: Client, message: Message):
     await db.unban_user(target_id)
     await message.reply_text(f"✅ User `{target_id}` ko unban kar diya gaya hai.")
 
-# --- 5. ADMIN COMMANDS: FILE DELETION ---
+# --- 5. ADMIN COMMANDS: FILE DELETION & CLEAR ALL ---
 @bot.on_message(filters.command("delete"))
 async def delete_single_cmd(client: Client, message: Message):
     if not is_admin(message.from_user.id):
@@ -205,6 +205,23 @@ async def delete_files_cmd(client: Client, message: Message):
     deleted_count = await db.delete_files_by_name(movie_name)
     await status_msg.edit_text(f"✅ `{movie_name}` se judi **{deleted_count} files** delete kar di gayi hain.")
 
+# Poori Database Clear Karne Ka Command (/clearall)
+@bot.on_message(filters.command(["clearall", "flushdb", "cleardb"]) & filters.private)
+async def clear_db_cmd(client: Client, message: Message):
+    if not is_admin(message.from_user.id):
+        return await message.reply_text("⛔ Sirf Admins ye command use kar sakte hain.")
+
+    confirm_markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⚠️ YES, DELETE ALL", callback_data="confirm_clear_all_db"),
+            InlineKeyboardButton("❌ CANCEL", callback_data="cancel_clear_db")
+        ]
+    ])
+    await message.reply_text(
+        "⚠️ **WARNING:** Kya aap sach me database ki **SAARI FILES** delete karna chahte hain?\n\nYeh action wapas nahi liya ja sakta!",
+        reply_markup=confirm_markup
+    )
+
 # --- 6. START COMMAND & FILE DELIVERY ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
@@ -233,6 +250,7 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
+    # Deliver file with clean warning caption (No extra buttons)
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -263,23 +281,27 @@ async def start_handler(client: Client, message: Message):
     if sent_start:
         asyncio.create_task(auto_delete_msg(client, user_id, sent_start.id, delay=86400))
 
-# --- 7. AUTO INDEX IN DB CHANNEL ---
+# --- 7. AUTO INDEX IN DB CHANNEL (DUPLICATE FILTER) ---
 @bot.on_message(filters.chat(DB_CHANNEL) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
     media = message.document or message.video or message.audio
     if not media:
         return
     file_name = getattr(media, "file_name", None) or message.caption or "Unknown"
-    await db.save_file(
+    
+    is_saved = await db.save_file(
         file_id=media.file_id,
         file_name=file_name,
         file_size=media.file_size,
         caption=message.caption or ""
     )
-    print(f"[INDEXED]: {file_name}", flush=True)
+    if is_saved:
+        print(f"[INDEXED]: {file_name}", flush=True)
+    else:
+        print(f"[DUPLICATE SKIPPED]: {file_name}", flush=True)
 
 # --- 8. MOVIE SEARCH HANDLER ---
-@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "stats", "status", "broadcast", "bcast"]))
+@bot.on_message((filters.private | filters.group) & filters.text & ~filters.command(["start", "help", "ban", "unban", "delete", "deletefiles", "deleteall", "delall", "clearall", "flushdb", "cleardb", "stats", "status", "broadcast", "bcast"]))
 async def filter_search(client: Client, message: Message):
     if not message.from_user:
         return
@@ -316,7 +338,7 @@ async def filter_search(client: Client, message: Message):
     total_pages = math.ceil(total_results / 10)
     files = await db.search_files(query, offset=0, limit=10)
 
-    # Caption with User ID for perfect green-italic mention styling
+    # Exact curved bold-italic search caption
     caption_text = ui.get_search_caption(first_name, user_id, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
@@ -338,6 +360,22 @@ async def callback_router(client: Client, query: CallbackQuery):
     # Broadcast confirmation callback
     if data.startswith("bcast_"):
         await handle_broadcast_callback(client, query)
+        return
+
+    # Clear All Database Confirmation
+    elif data == "confirm_clear_all_db":
+        if not is_admin(query.from_user.id):
+            return await query.answer("⛔ Access Denied!", show_alert=True)
+        
+        await query.message.edit_text("⏳ Saari files delete ho rahi hain, kripya wait karein...")
+        deleted_count = await db.clear_all_files()
+        await query.message.edit_text(f"✅ **Database poori tarah clear ho gaya hai!**\n\n🗑️ Total **{deleted_count} files** delete ki gayi hain.")
+        await query.answer()
+        return
+
+    elif data == "cancel_clear_db":
+        await query.message.edit_text("❌ Database clear cancel kar diya gaya.")
+        await query.answer()
         return
 
     elif data == "btn_search_guide":
