@@ -15,7 +15,6 @@ from pyrogram.types import (
 )
 from pyrogram.errors import UserNotParticipant, MessageNotModified, FloodWait
 
-# Config, Database, Broadcast aur UI Template imports
 from config import API_ID, API_HASH, BOT_TOKEN, DB_CHANNEL, FSUB_CHANNEL, ADMINS
 import database as db
 import template as ui
@@ -36,7 +35,6 @@ def is_admin(user_id: int) -> bool:
 
 # --- AUTO DELETE HELPERS ---
 async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: int):
-    """Delete any message safely without warning"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
@@ -44,7 +42,6 @@ async def auto_delete_msg(client: Client, chat_id: int, message_id: int, delay: 
         pass
 
 async def auto_delete_and_warn(client: Client, chat_id: int, message_id: int, first_name: str, user_id: int, delay: int):
-    """Wait -> Delete Message -> Send Standalone Warning Alert -> Delete Alert Later"""
     await asyncio.sleep(delay)
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=message_id)
@@ -104,7 +101,6 @@ async def broadcast_router(client: Client, message: Message):
 @bot.on_message(filters.group & filters.new_chat_members)
 async def group_welcome_handler(client: Client, message: Message):
     for member in message.new_chat_members:
-        # Case 1: Bot khud add hua hai
         if member.id == client.me.id:
             welcome_text = ui.get_group_welcome_text(message.chat.title)
             welcome_buttons = ui.get_group_welcome_buttons(client.me.username)
@@ -113,7 +109,6 @@ async def group_welcome_handler(client: Client, message: Message):
                 reply_markup=welcome_buttons,
                 reply_to_message_id=message.id
             )
-        # Case 2: Koi doosra user ya bot add hua hai
         else:
             welcome_user_text = ui.get_user_welcome_text(member.first_name, member.id, message.chat.title)
             await message.reply_text(
@@ -250,7 +245,7 @@ async def start_handler(client: Client, message: Message):
                 reply_to_message_id=message.id
             )
 
-    # Deliver file with clean warning caption (No extra buttons)
+    # Deliver file with clean warning caption
     if len(message.command) > 1 and message.command[1].startswith("file_"):
         db_id = message.command[1].replace("file_", "")
         file_data = await db.get_file_by_id(db_id)
@@ -261,7 +256,7 @@ async def start_handler(client: Client, message: Message):
                 file_id=file_data["file_id"],
                 caption=caption_text
             )
-            # Auto delete file after exactly 60 seconds (1 minute)
+            # Auto delete file after 60 seconds (1 minute)
             asyncio.create_task(auto_delete_msg(client, user_id, sent_msg.id, delay=60))
             return
 
@@ -338,7 +333,7 @@ async def filter_search(client: Client, message: Message):
     total_pages = math.ceil(total_results / 10)
     files = await db.search_files(query, offset=0, limit=10)
 
-    # Exact curved bold-italic search caption
+    # Caption matching Screenshot 1 & 2
     caption_text = ui.get_search_caption(first_name, user_id, query)
     keyboard = ui.build_pagination_keyboard(files, query_id, 1, total_pages, query, client.me.username)
 
