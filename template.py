@@ -2,18 +2,15 @@
 # FILE NAME: template.py
 # =========================================================
 
-# --- IMPORTS & LIBRARIES ---
 import math
 import re
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# /start command par aane wali welcome photo ka URL
 START_PIC = "https://graph.org/file/246a70cb4387b59cceb15-9e968f8602a6acb36c.jpg"
 
 
 # --- WELCOME & GUIDE MESSAGES ---
 
-# /start command bhejne par aane wala message
 def get_start_text(first_name: str) -> str:
     return (
         f"Hey 👋 **{first_name}**🤩\n\n"
@@ -21,7 +18,6 @@ def get_start_text(first_name: str) -> str:
         "Here You Can Request Movie's, Just Sent Movie OR WebSeries Name With Proper **Google** Spelling..!!"
     )
 
-# /start buttons
 def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     share_url = f"https://t.me/share/url?url=https://t.me/{bot_username}&text=Check%20out%20this%20awesome%20Movie%20Search%20Bot!"
     buttons = [
@@ -30,7 +26,6 @@ def get_start_buttons(bot_username: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
-# Group me naya user ya bot join hone par welcome message
 def get_user_welcome_text(user_first_name: str, user_id: int, group_title: str) -> str:
     user_mention = f"[{user_first_name}](tg://user?id={user_id})"
     return (
@@ -38,7 +33,6 @@ def get_user_welcome_text(user_first_name: str, user_id: int, group_title: str) 
         f"**Welcome to {group_title}.../**"
     )
 
-# Group me bot add hone par Thank You message
 def get_group_welcome_text(group_title: str) -> str:
     return (
         f"**Thankyou For Adding Me In**\n"
@@ -48,7 +42,6 @@ def get_group_welcome_text(group_title: str) -> str:
         "Me Click Below Button..⚡️⚡️."
     )
 
-# Group me aane wale buttons
 def get_group_welcome_buttons(bot_username: str) -> InlineKeyboardMarkup:
     buttons = [
         [
@@ -58,7 +51,6 @@ def get_group_welcome_buttons(bot_username: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(buttons)
 
-# Search guide popup
 def get_search_guide_text() -> str:
     return (
         "📨 **SEND MOVIE OR SERIES NAME AND YEAR AS PER GOOGLE SPELLING..!!** 👍\n\n"
@@ -71,7 +63,6 @@ def get_search_guide_text() -> str:
         "⚠️ **DON'T ADD EMOJIS AND SYMBOLS IN MOVIE NAME, USE LETTERS ONLY..!!** ❌"
     )
 
-# Database me result na milne par message
 def get_no_results_text() -> str:
     return (
         "● **I could not find the file you requested** 😕\n\n"
@@ -82,7 +73,6 @@ def get_no_results_text() -> str:
         "● **Also ask [movie name, language] like this...**"
     )
 
-# Force-Subscribe buttons
 def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)],
@@ -93,7 +83,6 @@ def get_fsub_buttons(invite_link: str, bot_username: str) -> InlineKeyboardMarku
 
 # --- FORMATTING & UTILITIES ---
 
-# File size conversion
 def humanbytes(size: int) -> str:
     if not size:
         return "0 B"
@@ -103,20 +92,27 @@ def humanbytes(size: int) -> str:
         size /= 1024.0
     return f"{size:.2f} {unit}"
 
-# Proper Title Case formatting (Preserves full name for landscape rotation)
+# Clean Button Formatter (Full details for Landscape/Rotate)
 def format_btn_name(file_name: str, file_size: int) -> str:
     size_str = humanbytes(file_size)
-    clean_title = file_name.replace("_", " ").replace(".", " ")
     
-    # Title Case conversion
-    clean_title = " ".join([w.capitalize() if not re.match(r"^(1080p|720p|480p|2160p|4k|mkv|mp4|esub|hin|kor|eng|dual|hq|hdr)$", w, re.I) else w.upper() for w in clean_title.split()])
+    # Remove dots and underscores
+    clean = re.sub(r"[\._+]", " ", file_name).strip()
     
-    # Season & Episode formatting (e.g. S01E01 or S02 EP 09)
-    clean_title = re.sub(r'(?i)\b(s\d{1,2})\s*(?:ep|e)?\s*(\d{1,2})\b', lambda m: f"{m.group(1).upper()} EP {m.group(2)}", clean_title)
-    
+    # Standardize keywords uppercase / title case
+    formatted_words = []
+    for w in clean.split():
+        if re.match(r"^(1080p|720p|480p|2160p|4k|web|dl|web-dl|mkv|mp4|esub|hin|kor|eng|tam|tel|kan|mal|dual|uncut|org|hq|hdr|x264|x265|hevc)$", w, re.I):
+            formatted_words.append(w.upper())
+        elif re.match(r"^(s\d{1,2}|e\d{1,2}|ep\d{1,2})$", w, re.I):
+            formatted_words.append(w.upper())
+        else:
+            formatted_words.append(w.capitalize())
+            
+    clean_title = " ".join(formatted_words)
     return f"{size_str} • {clean_title}"
 
-# Caption Format matching Screenshot (Curved Bold Italic Title & Ready)
+# Search Caption (Matching Screenshot 1 & 2)
 def get_search_caption(first_name: str, user_id: int, query: str) -> str:
     user_mention = f"[{first_name}](tg://user?id={user_id})"
     return (
@@ -127,9 +123,18 @@ def get_search_caption(first_name: str, user_id: int, query: str) -> str:
         "***Your Files is Ready Now***"
     )
 
-# File Caption matching 1 minute warning
+# File Caption (Exact Screenshot 3 formatting)
 def get_file_caption(raw_file_name: str) -> str:
-    clean_name = re.sub(r"[\._]", " ", raw_file_name).strip()
+    # Clean up file name
+    clean = re.sub(r"[\._+]", " ", raw_file_name).strip()
+    words = []
+    for w in clean.split():
+        if re.match(r"^(1080p|720p|480p|2160p|4k|web|dl|mkv|mp4|esub|hin|kor|eng|tam|tel|kan|mal|uncut|org|hq|hdr)$", w, re.I):
+            words.append(w.upper() if w.lower() != "uncut" and w.lower() != "mkv" else ("UnCut" if w.lower() == "uncut" else "mkv"))
+        else:
+            words.append(w.capitalize())
+    clean_name = " ".join(words)
+
     return (
         f"**{clean_name}**\n\n"
         "**⚠️❌👉This file automatically ❗**\n"
@@ -154,32 +159,35 @@ def get_deleted_alert_text(first_name: str, user_id: int) -> str:
 def build_pagination_keyboard(files: list, query_id: str, page: int, total_pages: int, query_title: str, bot_username: str) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Header Button: 🎬 Title in Title Case 🎬
+    # Header Button: 🎬 Title 🎬
     formatted_header = query_title.title()[:28]
     buttons.append([InlineKeyboardButton(f"🎬 {formatted_header} 🎬", callback_data="header_click")])
     
-    # Matching File Buttons (Deep Link)
+    # Matching File Buttons
     for f in files:
         file_db_id = str(f["_id"])
         btn_text = format_btn_name(f["file_name"], f["file_size"])
         buttons.append([InlineKeyboardButton(btn_text, url=f"https://t.me/{bot_username}?start=file_{file_db_id}")])
     
-    # Bottom Navigation Row matching Screenshot (Exact ▫️ Pages icon)
+    # Bottom Navigation Row matching Screenshot 1 & 2
     bottom_row = []
     if total_pages <= 1:
         bottom_row.append(InlineKeyboardButton("▫️ Pages", callback_data="pages_click"))
         bottom_row.append(InlineKeyboardButton("1/1", callback_data="pages_click"))
     else:
-        # Page 1 par "▫️ Pages", Page 2+ par exact "⏪ Previous"
+        # Page 1 par "▫️ Pages", Page 2+ par exact "◀️ Previous"
         if page > 1:
-            bottom_row.append(InlineKeyboardButton("⏪ Previous", callback_data=f"page_{query_id}_{page-1}"))
+            bottom_row.append(InlineKeyboardButton("◀️ Previous", callback_data=f"page_{query_id}_{page-1}"))
         else:
             bottom_row.append(InlineKeyboardButton("▫️ Pages", callback_data="pages_click"))
         
         # Middle Page Counter
-        bottom_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="pages_click"))
+        if page == 1:
+            bottom_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="pages_click"))
+        else:
+            bottom_row.append(InlineKeyboardButton(f"{page} / {total_pages}", callback_data="pages_click"))
         
-        # Next Button (Only on Page 1 / Before last page)
+        # Next Button
         if page < total_pages:
             bottom_row.append(InlineKeyboardButton("Next ⏩", callback_data=f"page_{query_id}_{page+1}"))
             
