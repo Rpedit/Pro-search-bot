@@ -1,13 +1,9 @@
-# =========================================================
-# FILE NAME: database.py
-# =========================================================
-
 import libsql_client
 from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
 
 client = None
 
-# --- 1. INITIALIZE DATABASE & TABLES ---
+# --- INITIALIZE DATABASE & CLIENT ---
 async def init_db():
     global client
     if client is None:
@@ -16,6 +12,7 @@ async def init_db():
             auth_token=TURSO_AUTH_TOKEN
         )
     
+    # Files Table (Search Index & Storage)
     await client.execute("""
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,16 +24,16 @@ async def init_db():
     """)
     await client.execute("CREATE INDEX IF NOT EXISTS idx_file_name ON files(file_name);")
     
+    # Users & Ban Management Table
     await client.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             is_banned INTEGER DEFAULT 0
         );
     """)
-    print("[DB]: Turso 9GB Database Connected & Tables Initialized!", flush=True)
+    print("[DB]: Turso 9GB Database Connected & Initialized Successfully!", flush=True)
 
-
-# --- 2. DATABASE STATISTICS ---
+# --- STATS / METRICS ---
 async def get_db_stats():
     res_files = await client.execute("SELECT COUNT(*) FROM files;")
     total_files = res_files.rows[0][0] if res_files.rows else 0
@@ -51,11 +48,10 @@ async def get_db_stats():
         "total_files": total_files,
         "total_users": total_users,
         "banned_users": banned_users,
-        "storage_type": "Turso libSQL (9 GB Free Pool)"
+        "storage_type": "Turso libSQL Cloud (9 GB Pool)"
     }
 
-
-# --- 3. USER MANAGEMENT ---
+# --- USER MANAGEMENT ---
 async def add_user(user_id: int):
     await client.execute(
         "INSERT INTO users (user_id, is_banned) VALUES (?, 0) ON CONFLICT(user_id) DO NOTHING;",
@@ -80,34 +76,33 @@ async def is_user_banned(user_id: int) -> bool:
         return bool(res.rows[0][0])
     return False
 
-async def get_all_users():
-    res = await client.execute("SELECT user_id FROM users WHERE is_banned = 0;")
-    return [r[0] for r in res.rows] if res.rows else []
-
-
-# --- 4. FILE STORAGE & SEARCH ---
+# --- FILE OPERATIONS WITH DUPLICATE PROTECTION ---
 async def save_file(file_id: str, file_name: str, file_size: int, caption: str = "") -> bool:
     try:
-        # Check duplicate by file_id OR exact (file_name + file_size)
+        clean_name = file_name.lower().strip()
+        
+        # Duplicate check by file_name + file_size
         check = await client.execute(
-            "SELECT id FROM files WHERE file_id = ? OR (file_name = ? AND file_size = ?);",
-            [file_id, file_name, file_size]
+            "SELECT id FROM files WHERE file_name = ? AND file_size = ? LIMIT 1;",
+            [clean_name, file_size]
         )
         if check.rows:
-            return False
-        
+            return False  # Already exists
+
         res = await client.execute(
-            "INSERT INTO files (file_id, file_name, file_size, caption) VALUES (?, ?, ?, ?);",
-            [file_id, file_name, file_size, caption]
+            "INSERT OR IGNORE INTO files (file_id, file_name, file_size, caption) VALUES (?, ?, ?, ?);",
+            [file_id, clean_name, file_size, caption]
         )
         return res.rows_affected > 0
-    except Exception as e:
-        print(f"[Save File Error]: {e}", flush=True)
+    except Exception:
         return False
 
 async def get_file_by_id(db_id: str):
     try:
-        res = await client.execute("SELECT id, file_id, file_name, file_size, caption FROM files WHERE id = ?;", [int(db_id)])
+        res = await client.execute(
+            "SELECT id, file_id, file_name, file_size, caption FROM files WHERE id = ?;", 
+            [int(db_id)]
+        )
         if res.rows:
             r = res.rows[0]
             return {
@@ -127,7 +122,7 @@ async def search_files(query: str, offset: int = 0, limit: int = 10):
     
     res = await client.execute(
         "SELECT id, file_id, file_name, file_size, caption FROM files WHERE file_name LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?;",
-        [like_pattern, limit, offset]
+        [like_pattern.lower(), limit, offset]
     )
     
     results = []
@@ -146,12 +141,11 @@ async def count_files(query: str) -> int:
     like_pattern = "%" + "%".join(words) + "%"
     res = await client.execute(
         "SELECT COUNT(*) FROM files WHERE file_name LIKE ?;",
-        [like_pattern]
+        [like_pattern.lower()]
     )
     return res.rows[0][0] if res.rows else 0
 
-
-# --- 5. FILE DELETION OPERATIONS ---
+# --- DELETE OPERATIONS ---
 async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
     if file_id:
         res = await client.execute("DELETE FROM files WHERE file_id = ?;", [file_id])
@@ -159,22 +153,15 @@ async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
     elif file_name:
         words = file_name.strip().split()
         like_pattern = "%" + "%".join(words) + "%"
-        res = await client.execute("DELETE FROM files WHERE id IN (SELECT id FROM files WHERE file_name LIKE ? LIMIT 1);", [like_pattern])
+        res = await client.execute(
+            "DELETE FROM files WHERE id IN (SELECT id FROM files WHERE file_name LIKE ? LIMIT 1);", 
+            [like_pattern.lower()]
+        )
         return res.rows_affected
     return 0
 
 async def delete_files_by_name(query: str) -> int:
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
-    res = await client.execute("DELETE FROM files WHERE file_name LIKE ?;", [like_pattern])
+    res = await client.execute("DELETE FROM files WHERE file_name LIKE ?;", [like_pattern.lower()])
     return res.rows_affected
-
-async def clear_all_files() -> int:
-    try:
-        count_res = await client.execute("SELECT COUNT(*) FROM files;")
-        total = count_res.rows[0][0] if count_res.rows else 0
-        await client.execute("DELETE FROM files;")
-        return total
-    except Exception as e:
-        print(f"[Clear DB Error]: {e}", flush=True)
-        return 0
