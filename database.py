@@ -26,18 +26,16 @@ class Database:
             caption TEXT
         );
         """
-        await self.client.execute(query)
+        try:
+            await self.client.execute(query)
+        except Exception as e:
+            print(f"Table Init: {e}")
 
     async def save_file(self, media, caption=""):
         file_id = media.file_id
-        
-        # File name extract logic (Telegram video me file_name missing hota hai)
         file_name = getattr(media, "file_name", None)
         if not file_name:
-            if caption:
-                file_name = caption.strip().split("\n")[0][:120]
-            else:
-                file_name = f"Movie_{file_id[:8]}"
+            file_name = caption.strip().split("\n")[0][:120] if caption else f"File_{file_id[:8]}"
 
         file_size = getattr(media, "file_size", 0)
         file_type = media.file_type.name if hasattr(media, "file_type") else "DOCUMENT"
@@ -50,52 +48,50 @@ class Database:
             await self.client.execute(query, [file_id, str(file_name), int(file_size), file_type, caption or ""])
             return True
         except Exception as e:
-            print(f"Error saving file: {e}")
+            print(f"Save Error: {e}")
             return False
 
     async def search_files(self, search_text, limit=10, offset=0):
-        # Text clean karke har word ko extract karein
         cleaned = search_text.replace(".", " ").replace("_", " ").replace("-", " ").strip()
         words = [w.strip() for w in cleaned.split() if w.strip()]
         
         if not words:
             return []
 
-        # Simple & Solid SQLite Substring Search
+        # Sabhi possible text fields me case-insensitive wildcard search
         conditions = []
         params = []
         for word in words:
-            conditions.append("(file_name LIKE ? OR caption LIKE ?)")
-            params.extend([f"%{word}%", f"%{word}%"])
+            conditions.append("(LOWER(file_name) LIKE ? OR LOWER(caption) LIKE ?)")
+            params.extend([f"%{word.lower()}%", f"%{word.lower()}%"])
 
         sql_where = " AND ".join(conditions)
-        query = f"SELECT file_id, file_name, file_size FROM files WHERE {sql_where} LIMIT ? OFFSET ?"
+        query = f"SELECT rowid, file_id, file_name, file_size FROM files WHERE {sql_where} LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
         try:
             res = await self.client.execute(query, params)
             results = []
             for row in res.rows:
-                f_id = row[0] if isinstance(row, (list, tuple)) else row["file_id"]
-                f_name = row[1] if isinstance(row, (list, tuple)) else row["file_name"]
-                f_size = row[2] if isinstance(row, (list, tuple)) else row["file_size"]
-                results.append((f_id, f_name, f_size))
+                # Row id (SQLite default rowid agar id missing ho)
+                r_id = row[0] if isinstance(row, (list, tuple)) else row.get("rowid", row.get("id", 1))
+                f_name = row[2] if isinstance(row, (list, tuple)) else row.get("file_name", "Unknown File")
+                f_size = row[3] if isinstance(row, (list, tuple)) else row.get("file_size", 0)
+                results.append((r_id, f_name, f_size))
             return results
         except Exception as e:
             print(f"Search Query Error: {e}")
             return []
 
-    async def get_file(self, file_id):
-        query = "SELECT file_id, file_name, file_size, caption FROM files WHERE file_id = ?"
+    async def get_file_by_id(self, row_id):
+        query = "SELECT file_id, file_name, file_size, caption FROM files WHERE rowid = ? OR id = ? LIMIT 1"
         try:
-            res = await self.client.execute(query, [file_id])
+            res = await self.client.execute(query, [int(row_id), int(row_id)])
             if res.rows:
                 row = res.rows[0]
-                f_id = row[0] if isinstance(row, (list, tuple)) else row["file_id"]
-                f_name = row[1] if isinstance(row, (list, tuple)) else row["file_name"]
-                f_size = row[2] if isinstance(row, (list, tuple)) else row["file_size"]
-                caption = row[3] if isinstance(row, (list, tuple)) else row["caption"]
-                return (f_id, f_name, f_size, caption)
+                if isinstance(row, (list, tuple)):
+                    return (row[0], row[1], row[2], row[3])
+                return (row.get("file_id"), row.get("file_name"), row.get("file_size"), row.get("caption"))
         except Exception as e:
             print(f"Get File Error: {e}")
         return None
@@ -104,7 +100,8 @@ class Database:
         try:
             res = await self.client.execute("SELECT COUNT(*) FROM files")
             if res.rows:
-                return res.rows[0][0] if isinstance(res.rows[0], (list, tuple)) else res.rows[0]["COUNT(*)"]
+                row = res.rows[0]
+                return row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]
         except Exception:
             return 0
 
