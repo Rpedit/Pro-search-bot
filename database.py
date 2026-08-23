@@ -2,26 +2,20 @@
 # FILE NAME: database.py
 # =========================================================
 
-# --- DATABASE CLIENT & CONFIG IMPORT ---
-import libsql_client  # Turso (libSQL/SQLite) cloud database client library
-from config import TURSO_DB_URL, TURSO_AUTH_TOKEN  # Cloud URL aur JWT token import
+import libsql_client
+from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
 
-# Global client object jo connection hold karega
 client = None
 
-
 # --- 1. INITIALIZE DATABASE & TABLES ---
-# Bot start hote waqt database tables aur indexes create karne ka function
 async def init_db():
     global client
-    # Turso cloud database se asynchronous connection establish karta hai
     if client is None:
         client = libsql_client.create_client(
             url=TURSO_DB_URL,
             auth_token=TURSO_AUTH_TOKEN
         )
     
-    # Files Table: Jahan media file_id, naam, size aur caption save hota hai
     await client.execute("""
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,10 +25,8 @@ async def init_db():
             caption TEXT
         );
     """)
-    # Auto-Index: Search fast karne ke liye file_name par B-tree index banata hai
     await client.execute("CREATE INDEX IF NOT EXISTS idx_file_name ON files(file_name);")
     
-    # Users Table: Bot users aur unka banned status track karne ke liye
     await client.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -45,7 +37,6 @@ async def init_db():
 
 
 # --- 2. DATABASE STATISTICS ---
-# Total files, total users aur banned users ka count nikalne ke liye
 async def get_db_stats():
     res_files = await client.execute("SELECT COUNT(*) FROM files;")
     total_files = res_files.rows[0][0] if res_files.rows else 0
@@ -64,8 +55,7 @@ async def get_db_stats():
     }
 
 
-# --- 3. USER MANAGEMENT (BAN / UNBAN / BROADCAST) ---
-
+# --- 3. USER MANAGEMENT ---
 async def add_user(user_id: int):
     await client.execute(
         "INSERT INTO users (user_id, is_banned) VALUES (?, 0) ON CONFLICT(user_id) DO NOTHING;",
@@ -95,9 +85,7 @@ async def get_all_users():
     return [r[0] for r in res.rows] if res.rows else []
 
 
-# --- 4. FILE STORAGE & SEARCH OPERATIONS ---
-
-# Nayi file save karta hai (Double file_id ya Same Name + Size dono duplicate ko skip karega)
+# --- 4. FILE STORAGE & SEARCH ---
 async def save_file(file_id: str, file_name: str, file_size: int, caption: str = "") -> bool:
     try:
         # Check duplicate by file_id OR exact (file_name + file_size)
@@ -106,7 +94,7 @@ async def save_file(file_id: str, file_name: str, file_size: int, caption: str =
             [file_id, file_name, file_size]
         )
         if check.rows:
-            return False  # Duplicate found, skip saving
+            return False
         
         res = await client.execute(
             "INSERT INTO files (file_id, file_name, file_size, caption) VALUES (?, ?, ?, ?);",
@@ -117,7 +105,6 @@ async def save_file(file_id: str, file_name: str, file_size: int, caption: str =
         print(f"[Save File Error]: {e}", flush=True)
         return False
 
-# Primary Key (id) ke basis par single file metadata fetch karta hai
 async def get_file_by_id(db_id: str):
     try:
         res = await client.execute("SELECT id, file_id, file_name, file_size, caption FROM files WHERE id = ?;", [int(db_id)])
@@ -134,7 +121,6 @@ async def get_file_by_id(db_id: str):
         pass
     return None
 
-# User search query ke mutabik files fetch karta hai (LIMIT aur OFFSET ke sath)
 async def search_files(query: str, offset: int = 0, limit: int = 10):
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
@@ -155,7 +141,6 @@ async def search_files(query: str, offset: int = 0, limit: int = 10):
         })
     return results
 
-# Total matching files count karta hai pagination ke liye
 async def count_files(query: str) -> int:
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
@@ -167,8 +152,6 @@ async def count_files(query: str) -> int:
 
 
 # --- 5. FILE DELETION OPERATIONS ---
-
-# Single file delete karta hai
 async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
     if file_id:
         res = await client.execute("DELETE FROM files WHERE file_id = ?;", [file_id])
@@ -180,14 +163,12 @@ async def delete_single_file(file_id: str = None, file_name: str = None) -> int:
         return res.rows_affected
     return 0
 
-# Series / movie ki matching files delete karta hai
 async def delete_files_by_name(query: str) -> int:
     words = query.strip().split()
     like_pattern = "%" + "%".join(words) + "%"
     res = await client.execute("DELETE FROM files WHERE file_name LIKE ?;", [like_pattern])
     return res.rows_affected
 
-# Poori database files clear karne ka function
 async def clear_all_files() -> int:
     try:
         count_res = await client.execute("SELECT COUNT(*) FROM files;")
