@@ -51,14 +51,15 @@ async def auto_index_media(client: Client, message: Message):
     if media:
         saved = await db.save_file(media, caption=message.caption or "")
         if saved:
-            print(f"[INDEXED] -> {getattr(media, 'file_name', 'Unnamed')}")
+            fname = getattr(media, "file_name", None) or (message.caption.split("\n")[0] if message.caption else "Media File")
+            print(f"[INDEXED] -> {fname}")
 
 # /start command handler
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
     user_id = message.from_user.id
     
-    # Check force sub
+    # Force Subscribe Check
     if not await check_fsub(client, user_id):
         invite_link = await client.export_chat_invite_link(config.FSUB_CHANNEL) if isinstance(config.FSUB_CHANNEL, int) else f"https://t.me/{config.FSUB_CHANNEL}"
         btn = [
@@ -67,7 +68,7 @@ async def start_handler(client: Client, message: Message):
         ]
         return await message.reply_text(FSUB_TXT, reply_markup=InlineKeyboardMarkup(btn))
 
-    # If deep link (file delivery)
+    # Deep link (Direct file delivery)
     if len(message.command) > 1:
         file_id = message.command[1]
         file_data = await db.get_file(file_id)
@@ -100,8 +101,20 @@ async def stats_handler(client: Client, message: Message):
     total = await db.total_files()
     await message.reply_text(f"📊 **Database Stats:**\n\n📁 **Total Indexed Files:** `{total}`")
 
+# /checkdb command (Admin Only - DB inspect karne ke liye)
+@bot.on_message(filters.command("checkdb") & filters.user(config.ADMINS))
+async def check_db_handler(client: Client, message: Message):
+    samples = await db.get_sample_files()
+    if not samples:
+        return await message.reply_text("Database khali hai ya connect nahi ho raha.")
+    
+    text = "📁 **Sample Saved Files in DB:**\n\n"
+    for name, size in samples:
+        text += f"• `{name}` ({get_readable_size(size)})\n"
+    await message.reply_text(text)
+
 # Auto Filter Text Search Handler
-@bot.on_message(filters.text & filters.private & ~filters.command(["start", "stats"]))
+@bot.on_message(filters.text & filters.private & ~filters.command(["start", "stats", "checkdb"]))
 async def filter_search(client: Client, message: Message):
     user_id = message.from_user.id
     query = message.text.strip()
@@ -122,7 +135,7 @@ async def filter_search(client: Client, message: Message):
         btn_text = f"[{size_str}] {f_name}"
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"getfile_{f_id}")])
 
-    # Next page navigation button if 10 results returned
+    # Next page button if 10 results returned
     if len(files) == 10:
         buttons.append([InlineKeyboardButton("Next Page ➡️", callback_data=f"next_{query}_10")])
 
@@ -131,7 +144,7 @@ async def filter_search(client: Client, message: Message):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# Callback Queries Handler (Pagination, File Delivery & Details)
+# Callback Queries Handler
 @bot.on_callback_query()
 async def callback_handler(client: Client, query: CallbackQuery):
     data = query.data
