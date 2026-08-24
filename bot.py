@@ -1,10 +1,13 @@
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultCachedDocument
+from pyrogram.enums import ChatMemberStatus
+from pyrogram.errors import UserNotParticipant
 from config import API_ID, API_HASH, BOT_TOKEN, FSUB_CHANNEL, ADMINS
 from database import db
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Main client
 app = Client(
@@ -19,24 +22,33 @@ async def start_handler(client, message):
     # Force Subscription Check
     if FSUB_CHANNEL:
         try:
-            chat_id = FSUB_CHANNEL if isinstance(FSUB_CHANNEL, int) else f"@{FSUB_CHANNEL}"
+            # Handle int or str channel id/username
+            if str(FSUB_CHANNEL).startswith("-100") or str(FSUB_CHANNEL).isdigit():
+                chat_id = int(FSUB_CHANNEL)
+            else:
+                chat_id = FSUB_CHANNEL if FSUB_CHANNEL.startswith("@") else f"@{FSUB_CHANNEL}"
+
             user = await client.get_chat_member(chat_id, message.from_user.id)
-            if user.status == "kicked":
-                await message.reply("❌ Aapko channel se ban kar diya gaya hai!")
+            if user.status in [ChatMemberStatus.BANNED, ChatMemberStatus.RESTRICTED]:
+                await message.reply("❌ Aapko channel se ban ya restrict kiya gaya hai!")
                 return
-        except Exception:
-            channel_username = FSUB_CHANNEL if not isinstance(FSUB_CHANNEL, int) else "HDProSearch"
+        except UserNotParticipant:
+            invite_link = f"https://t.me/{str(FSUB_CHANNEL).replace('@', '')}"
             btn = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 Join Update Channel", url=f"https://t.me/{channel_username}")]
+                [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)]
             ])
             await message.reply(
                 "👋 **Hello!** Bot ko use karne ke liye pehle hamara update channel join karna zaroori hai.",
                 reply_markup=btn
             )
             return
+        except Exception as e:
+            logger.error(f"FSUB Check Error: {e}")
+            # Agar bot khud admin nahi hai ya koi aur issue aaye toh start process continue rahega
 
+    user_name = message.from_user.first_name if message.from_user else "User"
     await message.reply(
-        f"👋 Hello **{message.from_user.first_name}**!\n\n"
+        f"👋 Hello **{user_name}**!\n\n"
         "Main **iPapkorn style** Auto-Filter Bot hoon. Mujhe kisi bhi Movie ya Series ka naam bhejo, main aapko turant file dunga! 🚀"
     )
 
@@ -47,20 +59,23 @@ async def auto_filter(client, message):
         await message.reply("Kripya kam se kam 2 letters likhein search karne ke liye.")
         return
 
-    files = await db.search_files(query, max_results=10)
-    
-    if not files:
-        await message.reply("❌ Koi bhi file nahi mili! Spelling check karke dobara try karein.")
-        return
+    try:
+        files = await db.search_files(query, max_results=10)
+        
+        if not files:
+            await message.reply("❌ Koi bhi file nahi mili! Spelling check karke dobara try karein.")
+            return
 
-    text = f"🔍 **Search Results for:** `{query}`\n\n"
-    buttons = []
-    
-    for file in files:
-        # File list buttons
-        buttons.append([InlineKeyboardButton(file['file_name'], callback_data=f"file_{file['file_id'][:10]}")])
+        text = f"🔍 **Search Results for:** `{query}`\n\n"
+        buttons = []
+        
+        for file in files:
+            buttons.append([InlineKeyboardButton(file['file_name'], callback_data=f"file_{file['file_id'][:10]}")])
 
-    await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception as e:
+        logger.error(f"Search Error: {e}")
+        await message.reply("⚠️ Search karte waqt error aaya. Kripya baad me try karein.")
 
 @app.on_inline_query()
 async def inline_search(client, inline_query):
@@ -68,14 +83,17 @@ async def inline_search(client, inline_query):
     results = []
     
     if query:
-        files = await db.search_files(query, max_results=20)
-        for file in files:
-            results.append(
-                InlineQueryResultCachedDocument(
-                    title=file['file_name'],
-                    file_id=file['file_id'],
-                    caption=f"📁 **{file['file_name']}**\n\n✨ Shared via HDPro Search Bot",
+        try:
+            files = await db.search_files(query, max_results=20)
+            for file in files:
+                results.append(
+                    InlineQueryResultCachedDocument(
+                        title=file['file_name'],
+                        file_id=file['file_id'],
+                        caption=f"📁 **{file['file_name']}**\n\n✨ Shared via HDPro Search Bot",
+                    )
                 )
-            )
+        except Exception as e:
+            logger.error(f"Inline Search Error: {e}")
             
     await inline_query.answer(results, cache_time=1)
