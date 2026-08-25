@@ -21,7 +21,7 @@ async def is_subscribed(client: Client, user_id: int) -> bool:
     except UserNotParticipant:
         return False
     except Exception as e:
-        print(f"FSub Error: {e}", flush=True)
+        print(f"[WARNING] FSub Error: {e}", flush=True)
         return True
 
 def get_fsub_markup():
@@ -32,79 +32,91 @@ def get_fsub_markup():
 
 @bot.on_message(filters.command(["start", "help"]) & filters.private)
 async def start_handler(client: Client, message: Message):
-    print(f"[DEBUG] Start command received from: {message.from_user.id}", flush=True)
-    
-    if not await is_subscribed(client, message.from_user.id):
-        return await message.reply_text(
-            "⚠️ **Access Denied!**\n\nBot use karne ke liye pehle official channel join karein.",
-            reply_markup=get_fsub_markup()
-        )
-    await message.reply_text(f"Hello {message.from_user.mention}! 👋\n\nKoi bhi Movie ya Web Series ka naam bhejein.")
+    try:
+        print(f"[EVENT] /start received from user: {message.from_user.id}", flush=True)
+        if not await is_subscribed(client, message.from_user.id):
+            return await message.reply_text(
+                "⚠️ **Access Denied!**\n\nBot use karne ke liye pehle official channel join karein.",
+                reply_markup=get_fsub_markup()
+            )
+        await message.reply_text(f"Hello {message.from_user.mention}! 👋\n\nKoi bhi Movie ya Web Series ka naam bhejein.")
+    except Exception as e:
+        print(f"[ERROR] start_handler: {e}", flush=True)
 
-# Auto index incoming channel media
 @bot.on_message(filters.chat(INDEX_CHANNELS) & (filters.document | filters.video | filters.audio))
 async def auto_index(client: Client, message: Message):
-    media = message.document or message.video or message.audio
-    if media:
-        saved = await save_file(media)
-        if saved:
-            print(f"[SAVED] Indexed new file: {getattr(media, 'file_name', 'media')}", flush=True)
+    try:
+        media = message.document or message.video or message.audio
+        if media:
+            saved = await save_file(media)
+            if saved:
+                print(f"[INDEXED] Saved new file: {getattr(media, 'file_name', 'media')}", flush=True)
+    except Exception as e:
+        print(f"[ERROR] auto_index: {e}", flush=True)
 
-# Search Query handler
 @bot.on_message(filters.text & filters.private)
 async def search_handler(client: Client, message: Message):
     if message.text.startswith("/"):
         return
 
-    print(f"[DEBUG] Search received: '{message.text}' from {message.from_user.id}", flush=True)
+    try:
+        print(f"[SEARCH] Query received: '{message.text}' from user: {message.from_user.id}", flush=True)
 
-    if not await is_subscribed(client, message.from_user.id):
-        return await message.reply_text(
-            "⚠️ **Access Denied!**\n\nFiles search karne ke liye pehle channel join karein.",
-            reply_markup=get_fsub_markup()
-        )
+        if not await is_subscribed(client, message.from_user.id):
+            return await message.reply_text(
+                "⚠️ **Access Denied!**\n\nFiles search karne ke liye pehle channel join karein.",
+                reply_markup=get_fsub_markup()
+            )
 
-    query = message.text.strip()
-    results = await search_db(query)
+        query = message.text.strip()
+        results = await search_db(query)
 
-    if not results:
-        return await message.reply_text(f"❌ **'{query}'** ke liye database me koi file nahi mili.")
+        if not results:
+            print(f"[SEARCH] No results found for query: '{query}'", flush=True)
+            return await message.reply_text(f"❌ **'{query}'** ke liye database me koi file nahi mili.")
 
-    caption = get_search_message(query, message.from_user.mention)
-    markup = build_pagination_keyboard(results, query, page=1)
-    await message.reply_text(caption, reply_markup=markup)
+        print(f"[SEARCH] Found {len(results)} files for query: '{query}'", flush=True)
+        caption = get_search_message(query, message.from_user.mention)
+        markup = build_pagination_keyboard(results, query, page=1)
+        await message.reply_text(caption, reply_markup=markup)
+    except Exception as e:
+        print(f"[ERROR] search_handler: {e}", flush=True)
+        await message.reply_text("⚠️ Kuch error aa gaya hai. Kripya thodi der baad try karein.")
 
-# Pagination & File Delivery
 @bot.on_callback_query()
 async def callback_handler(client: Client, query: CallbackQuery):
-    data = query.data
+    try:
+        data = query.data
 
-    if data == "pages_info":
-        return await query.answer()
+        if data == "pages_info":
+            return await query.answer()
 
-    if data.startswith("nav_"):
-        parts = data.split("_")
-        page = int(parts[-1])
-        search_text = "_".join(parts[1:-1])
-        
-        results = await search_db(search_text)
-        if not results:
-            return await query.answer("No files found!", show_alert=True)
+        if data.startswith("nav_"):
+            parts = data.split("_")
+            page = int(parts[-1])
+            search_text = "_".join(parts[1:-1])
+            
+            results = await search_db(search_text)
+            if not results:
+                return await query.answer("No files found!", show_alert=True)
 
-        markup = build_pagination_keyboard(results, search_text, page=page)
-        await query.message.edit_reply_markup(reply_markup=markup)
-        await query.answer()
+            markup = build_pagination_keyboard(results, search_text, page=page)
+            await query.message.edit_reply_markup(reply_markup=markup)
+            await query.answer()
 
-    elif data.startswith("get_"):
-        file_id = data.split("get_", 1)[1]
-        file_data = await get_file(file_id)
+        elif data.startswith("get_"):
+            file_id = data.split("get_", 1)[1]
+            file_data = await get_file(file_id)
 
-        if not file_data:
-            return await query.answer("File database me nahi mili!", show_alert=True)
+            if not file_data:
+                return await query.answer("File database me nahi mili!", show_alert=True)
 
-        await query.answer("Sending...")
-        await client.send_cached_media(
-            chat_id=query.from_user.id,
-            file_id=file_data["file_id"],
-            caption=f"📁 **{file_data['file_name']}**"
-        )
+            await query.answer("Sending file...")
+            await client.send_cached_media(
+                chat_id=query.from_user.id,
+                file_id=file_data["file_id"],
+                caption=f"📁 **{file_data['file_name']}**"
+            )
+    except Exception as e:
+        print(f"[ERROR] callback_handler: {e}", flush=True)
+        await query.answer("Kuch error aa gaya!", show_alert=True)
