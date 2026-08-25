@@ -14,7 +14,7 @@ FORCE_SUB_CHANNEL = int(os.environ.get("FORCE_SUB_CHANNEL", "-1002855667443"))
 FORCE_SUB_INVITE = os.environ.get("FORCE_SUB_INVITE", "https://t.me/HDProSearch")
 
 # --- Dual MongoDB Config ---
-DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://rpeditz:rpeditz_07@rpeditz.gxciklb.mongodb.net/?retryWrites=true&w=majority&appName=rpeditz")          # DB 1 (Primary Cluster)
+DATABASE_URI = os.environ.get("DATABASE_URI", "mongodb+srv://rpeditz:rpeditz@rpeditz.rym8nia.mongodb.net/?retryWrites=true&w=majority&appName=rpeditz")          # DB 1 (Primary Cluster)
 DATABASE_URI_2 = os.environ.get("DATABASE_URI_2", "")      # DB 2 (Secondary Cluster)
 USE_SECOND_DB = os.environ.get("USE_SECOND_DB", "False").strip().lower() in ("true", "1", "yes")
 
