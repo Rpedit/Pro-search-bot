@@ -1,99 +1,104 @@
-import logging
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultCachedDocument
-from pyrogram.enums import ChatMemberStatus
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import UserNotParticipant
-from config import API_ID, API_HASH, BOT_TOKEN, FSUB_CHANNEL, ADMINS
-from database import db
+from config import API_ID, API_HASH, BOT_TOKEN, INDEX_CHANNELS, FORCE_SUB_CHANNEL, FORCE_SUB_INVITE
+from database import save_file, search_db, get_file
+from template import get_search_message, build_pagination_keyboard
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Main client
-app = Client(
-    "HDProSearchBot",
+bot = Client(
+    "AutoFilterBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-@app.on_message(filters.command("start") & filters.private)
-async def start_handler(client, message):
-    # Force Subscription Check
-    if FSUB_CHANNEL:
-        try:
-            # Handle int or str channel id/username
-            if str(FSUB_CHANNEL).startswith("-100") or str(FSUB_CHANNEL).isdigit():
-                chat_id = int(FSUB_CHANNEL)
-            else:
-                chat_id = FSUB_CHANNEL if FSUB_CHANNEL.startswith("@") else f"@{FSUB_CHANNEL}"
+async def is_subscribed(client: Client, user_id: int) -> bool:
+    """Channel membership verify karta hai"""
+    if not FORCE_SUB_CHANNEL:
+        return True
+    try:
+        member = await client.get_chat_member(FORCE_SUB_CHANNEL, user_id)
+        return member.status not in ["kicked", "left"]
+    except UserNotParticipant:
+        return False
+    except Exception:
+        return True
 
-            user = await client.get_chat_member(chat_id, message.from_user.id)
-            if user.status in [ChatMemberStatus.BANNED, ChatMemberStatus.RESTRICTED]:
-                await message.reply("❌ Aapko channel se ban ya restrict kiya gaya hai!")
-                return
-        except UserNotParticipant:
-            invite_link = f"https://t.me/{str(FSUB_CHANNEL).replace('@', '')}"
-            btn = InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 Join Update Channel", url=invite_link)]
-            ])
-            await message.reply(
-                "👋 **Hello!** Bot ko use karne ke liye pehle hamara update channel join karna zaroori hai.",
-                reply_markup=btn
-            )
-            return
-        except Exception as e:
-            logger.error(f"FSUB Check Error: {e}")
-            # Agar bot khud admin nahi hai ya koi aur issue aaye toh start process continue rahega
+def get_fsub_markup():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Join Updates Channel", url=FORCE_SUB_INVITE)],
+        [InlineKeyboardButton("🔄 Try Again", url=f"https://t.me/{bot.me.username}?start=start")]
+    ])
 
-    user_name = message.from_user.first_name if message.from_user else "User"
-    await message.reply(
-        f"👋 Hello **{user_name}**!\n\n"
-        "Main **iPapkorn style** Auto-Filter Bot hoon. Mujhe kisi bhi Movie ya Series ka naam bhejo, main aapko turant file dunga! 🚀"
-    )
+@bot.on_message(filters.command("start") & filters.private)
+async def start_handler(client: Client, message: Message):
+    if not await is_subscribed(client, message.from_user.id):
+        return await message.reply_text(
+            "⚠️ **Access Denied!**\n\nBot ko use karne ke liye pehle official updates channel join karein.",
+            reply_markup=get_fsub_markup()
+        )
+    await message.reply_text(f"Hello {message.from_user.mention}! Koi bhi Movie ya Series ka naam likh kar send karein.")
 
-@app.on_message(filters.text & filters.private & ~filters.command(["start", "help"]))
-async def auto_filter(client, message):
-    query = message.text.strip()
-    if len(query) < 2:
-        await message.reply("Kripya kam se kam 2 letters likhein search karne ke liye.")
+# Channels se auto-indexing handler
+@bot.on_message(filters.chat(INDEX_CHANNELS) & (filters.document | filters.video | filters.audio))
+async def auto_index(client: Client, message: Message):
+    media = message.document or message.video or message.audio
+    if media:
+        await save_file(media)
+
+# Search Query handler
+@bot.on_message(filters.text & filters.private)
+async def search_handler(client: Client, message: Message):
+    if message.text.startswith("/"):
         return
 
-    try:
-        files = await db.search_files(query, max_results=10)
+    if not await is_subscribed(client, message.from_user.id):
+        return await message.reply_text(
+            "⚠️ **Access Denied!**\n\nFiles search karne ke liye pehle channel join karein.",
+            reply_markup=get_fsub_markup()
+        )
+
+    query = message.text.strip()
+    results = await search_db(query)
+
+    if not results:
+        return await message.reply_text(f"❌ **'{query}'** ke liye koi file nahi mili.")
+
+    caption = get_search_message(query, message.from_user.mention)
+    markup = build_pagination_keyboard(results, query, page=1)
+    await message.reply_text(caption, reply_markup=markup)
+
+# Pagination & File Delivery Buttons Handler
+@bot.on_callback_query()
+async def callback_handler(client: Client, query: CallbackQuery):
+    data = query.data
+
+    if data == "pages_info":
+        return await query.answer()
+
+    if data.startswith("nav_"):
+        parts = data.split("_")
+        page = int(parts[-1])
+        search_text = "_".join(parts[1:-1])
         
-        if not files:
-            await message.reply("❌ Koi bhi file nahi mili! Spelling check karke dobara try karein.")
-            return
+        results = await search_db(search_text)
+        if not results:
+            return await query.answer("Koi files nahi mili!", show_alert=True)
 
-        text = f"🔍 **Search Results for:** `{query}`\n\n"
-        buttons = []
-        
-        for file in files:
-            buttons.append([InlineKeyboardButton(file['file_name'], callback_data=f"file_{file['file_id'][:10]}")])
+        markup = build_pagination_keyboard(results, search_text, page=page)
+        await query.message.edit_reply_markup(reply_markup=markup)
+        await query.answer()
 
-        await message.reply(text, reply_markup=InlineKeyboardMarkup(buttons))
-    except Exception as e:
-        logger.error(f"Search Error: {e}")
-        await message.reply("⚠️ Search karte waqt error aaya. Kripya baad me try karein.")
+    elif data.startswith("get_"):
+        file_id = data.split("get_", 1)[1]
+        file_data = await get_file(file_id)
 
-@app.on_inline_query()
-async def inline_search(client, inline_query):
-    query = inline_query.query.strip()
-    results = []
-    
-    if query:
-        try:
-            files = await db.search_files(query, max_results=20)
-            for file in files:
-                results.append(
-                    InlineQueryResultCachedDocument(
-                        title=file['file_name'],
-                        file_id=file['file_id'],
-                        caption=f"📁 **{file['file_name']}**\n\n✨ Shared via HDPro Search Bot",
-                    )
-                )
-        except Exception as e:
-            logger.error(f"Inline Search Error: {e}")
-            
-    await inline_query.answer(results, cache_time=1)
+        if not file_data:
+            return await query.answer("File database me nahi mili!", show_alert=True)
+
+        await query.answer("Sending file...")
+        await client.send_cached_media(
+            chat_id=query.from_user.id,
+            file_id=file_data["file_id"],
+            caption=f"📁 **{file_data['file_name']}**"
+        )
