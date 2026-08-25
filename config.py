@@ -7,11 +7,11 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
 
 # --- Admins & Indexing Channels ---
 ADMINS = [int(admin) for admin in os.environ.get("ADMINS", "123456789").split()]
-INDEX_CHANNELS = [int(ch) for ch in os.environ.get("INDEX_CHANNELS", "-1001234567890").split()]
+INDEX_CHANNELS = [int(ch) for ch in os.environ.get("INDEX_CHANNELS", "-1003968479864").split()]
 
 # --- Force Subscribe Settings ---
-FORCE_SUB_CHANNEL = int(os.environ.get("FORCE_SUB_CHANNEL", "-1001234567890"))
-FORCE_SUB_INVITE = os.environ.get("FORCE_SUB_INVITE", "https://t.me/YourChannelLink")
+FORCE_SUB_CHANNEL = int(os.environ.get("FORCE_SUB_CHANNEL", "-1002855667443"))
+FORCE_SUB_INVITE = os.environ.get("FORCE_SUB_INVITE", "https://t.me/HDProSearch")
 
 # --- Dual MongoDB Config ---
 DATABASE_URI = os.environ.get("DATABASE_URI", "")          # DB 1 (Primary Cluster)
