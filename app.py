@@ -1,24 +1,25 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from bot import app as bot_client  # bot.py se app client ko import karo
-from database import db
+import asyncio
+from aiohttp import web
+from bot import bot
+from config import PORT
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Database & Bot init
-    await db.setup()
-    await bot_client.start()
-    print("🚀 Bot & Turso DB Started Successfully!")
-    yield
-    # Shutdown
-    await bot_client.stop()
+async def handle_ping(request):
+    return web.Response(text="Bot is running 24/7 Alive!")
 
-app = FastAPI(lifespan=lifespan)
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    app.router.add_get("/health", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
 
-@app.get("/")
-def home():
-    return {"status": "running", "service": "HD Pro Search Bot"}
+async def main():
+    await start_web_server()
+    await bot.start()
+    print(">>> Auto Filter Bot Started Successfully <<<")
+    await asyncio.Event().wait()
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+if __name__ == "__main__":
+    asyncio.run(main())
