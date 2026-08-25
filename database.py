@@ -2,13 +2,15 @@ import re
 import motor.motor_asyncio
 from config import DATABASE_URI, DATABASE_URI_2, USE_SECOND_DB
 
+# Primary Database Client & Collection
 client1 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI) if DATABASE_URI else None
 db1 = client1["AutoFilterBot"] if client1 else None
 col1 = db1["files"] if db1 is not None else None
 
+# Secondary Database Client & Collection (Safe Initialization)
 client2 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI_2) if DATABASE_URI_2 else None
 db2 = client2["AutoFilterBot"] if client2 else None
-col2 = db2["files"] if col2 is not None else None
+col2 = db2["files"] if db2 is not None else None
 
 def get_active_collection():
     if USE_SECOND_DB and col2 is not None:
@@ -43,7 +45,6 @@ async def save_file(media):
 
 async def search_db(query: str, limit: int = 300):
     try:
-        # Special characters ko escape karna zaroori hai taaki regex crash na ho
         safe_query = re.escape(query)
         regex = {"file_name": {"$regex": safe_query, "$options": "i"}}
         results = []
