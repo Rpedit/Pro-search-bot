@@ -1,79 +1,76 @@
-import logging
-import libsql_client
-from config import TURSO_DB_URL, TURSO_AUTH_TOKEN
+import motor.motor_asyncio
+from config import DATABASE_URI, DATABASE_URI_2, USE_SECOND_DB
 
-logger = logging.getLogger(__name__)
+# Primary Database (DB 1)
+client1 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI) if DATABASE_URI else None
+db1 = client1["AutoFilterBot"] if client1 else None
+col1 = db1["files"] if db1 is not None else None
 
-class Database:
-    def __init__(self, url: str, auth_token: str):
-        # LibSQL standard HTTP/HTTPS or LibSQL URL handling
-        self.url = url
-        self.auth_token = auth_token
-        self._client = None
+# Secondary Database (DB 2)
+client2 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI_2) if DATABASE_URI_2 else None
+db2 = client2["AutoFilterBot"] if client2 else None
+col2 = db2["files"] if db2 is not None else None
 
-    def get_client(self):
-        # Single client instance manage karta hai taaki unnecessary handshakes na hon
-        if self._client is None:
-            self._client = libsql_client.create_client(
-                url=self.url,
-                auth_token=self.auth_token
-            )
-        return self._client
+def get_active_collection():
+    """Nayi files save karne ke liye active database return karta hai"""
+    if USE_SECOND_DB and col2 is not None:
+        return col2
+    return col1
 
-    async def setup(self):
-        client = self.get_client()
-        try:
-            await client.execute("""
-                CREATE TABLE IF NOT EXISTS files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_id TEXT UNIQUE,
-                    file_name TEXT,
-                    file_size TEXT
-                )
-            """)
-            # Search fast karne ke liye index
-            await client.execute("""
-                CREATE INDEX IF NOT EXISTS idx_file_name ON files(file_name)
-            """)
-            logger.info("Turso Database Table setup completed.")
-        except Exception as e:
-            logger.error(f"DB Setup Error: {e}")
-            raise e
+async def save_file(media):
+    """File details database me index karne ke liye"""
+    col = get_active_collection()
+    if col is None:
+        return False
 
-    async def add_file(self, file_id: str, file_name: str, file_size: str):
-        client = self.get_client()
-        try:
-            await client.execute(
-                "INSERT OR IGNORE INTO files (file_id, file_name, file_size) VALUES (?, ?, ?)",
-                [file_id, file_name, str(file_size)]
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Add File Error: {e}")
-            return False
+    file_id = media.file_id
+    file_name = getattr(media, "file_name", "Unknown File")
+    file_size = getattr(media, "file_size", 0)
+    mime_type = getattr(media, "mime_type", "None")
 
-    async def search_files(self, query: str, max_results: int = 10):
-        client = self.get_client()
-        try:
-            # Case-insensitive LIKE query using LOWER()
-            sql = "SELECT file_id, file_name, file_size FROM files WHERE LOWER(file_name) LIKE ? LIMIT ?"
-            result = await client.execute(sql, [f"%{query.lower()}%", max_results])
-            
-            files = []
-            for row in result.rows:
-                files.append({
-                    "file_id": str(row[0]),
-                    "file_name": str(row[1]),
-                    "file_size": str(row[2]) if len(row) > 2 else ""
-                })
-            return files
-        except Exception as e:
-            logger.error(f"Search Files DB Error: {e}")
-            return []
+    exists = await col.find_one({"file_id": file_id})
+    if not exists:
+        doc = {
+            "file_id": file_id,
+            "file_name": file_name,
+            "file_size": file_size,
+            "mime_type": mime_type
+        }
+        await col.insert_one(doc)
+        return True
+    return False
 
-    async def close(self):
-        if self._client:
-            await self._client.close()
-            self._client = None
+async def search_db(query: str, limit: int = 300):
+    """Dono databases (DB 1 + DB 2) me search karke combined list return karta hai"""
+    regex = {"file_name": {"$regex": query, "$options": "i"}}
+    results = []
 
-db = Database(TURSO_DB_URL, TURSO_AUTH_TOKEN)
+    if col1 is not None:
+        res1 = await col1.find(regex).to_list(length=limit)
+        results.extend(res1)
+
+    if col2 is not None:
+        res2 = await col2.find(regex).to_list(length=limit)
+        results.extend(res2)
+
+    # Unique files filter (by file_id)
+    seen = set()
+    unique_results = []
+    for item in results:
+        if item["file_id"] not in seen:
+            seen.add(item["file_id"])
+            unique_results.append(item)
+
+    return unique_results
+
+async def get_file(file_id: str):
+    """File send karne ke liye document fetch karta hai"""
+    if col1 is not None:
+        file_data = await col1.find_one({"file_id": file_id})
+        if file_data:
+            return file_data
+    if col2 is not None:
+        file_data = await col2.find_one({"file_id": file_id})
+        if file_data:
+            return file_data
+    return None
