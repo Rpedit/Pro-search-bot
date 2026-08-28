@@ -51,21 +51,35 @@ async def start_handler(client, message: Message):
         disable_web_page_preview=True
     )
 
+# Check total indexed files and users
+@app.on_message(filters.command("stats") & filters.user(ADMINS))
+async def stats_handler(client, message: Message):
+    total_users = await db_instance.total_users_count()
+    total_files = await db_instance.total_files_count()
+    await message.reply_text(
+        f"📊 <b>Bot Database Stats:</b>\n\n"
+        f"👥 Total Users: <code>{total_users}</code>\n"
+        f"📁 Total Indexed Files: <code>{total_files}</code>"
+    )
+
 @app.on_callback_query(filters.regex("check_sub"))
 async def check_sub_handler(client, query: CallbackQuery):
     if not await is_subscribed(client, query.from_user.id):
-        await query.answer("❌ Aapne abhi tak channel join nahi kiya hai!", show_alert=True)
+        await query.answer("❌ Pehle channel join karein!", show_alert=True)
         return
     await query.message.delete()
     await query.message.reply_text("✅ Verification Successful! Ab aap koi bhi movie search kar sakte hain.")
 
+# Automatic Channel File Indexing
 @app.on_message(filters.chat(CHANNELS) & (filters.document | filters.video | filters.audio))
 async def media_indexer(client, message: Message):
     media = message.document or message.video or message.audio
     if media:
+        # Proper fallback: Extract name from media object or message caption
+        file_name = getattr(media, "file_name", None) or message.caption or "Unknown Movie"
         file_data = {
             "file_id": media.file_id,
-            "file_name": media.file_name or "Unknown Movie",
+            "file_name": file_name,
             "file_size": media.file_size,
             "mime_type": getattr(media, "mime_type", "")
         }
@@ -73,7 +87,6 @@ async def media_indexer(client, message: Message):
 
 def create_search_markup(results, query, page=1):
     buttons = []
-    # Header Button (Movie Title Banner)
     buttons.append([InlineKeyboardButton(f"🎬 {query.title()} 🎬", callback_data="ignore")])
     
     PER_PAGE = 10
@@ -84,13 +97,11 @@ def create_search_markup(results, query, page=1):
     end_idx = start_idx + PER_PAGE
     page_files = results[start_idx:end_idx]
     
-    # Size • Filename format
     for file in page_files:
         size_str = format_size(file['file_size'])
         btn_text = f"{size_str} • {file['file_name']}"
         buttons.append([InlineKeyboardButton(btn_text, callback_data=f"file#{file['file_id']}")])
         
-    # Pagination Row
     nav_buttons = []
     if page > 1:
         nav_buttons.append(InlineKeyboardButton("⏪ Previous", callback_data=f"page#{query}#{page-1}"))
@@ -105,7 +116,8 @@ def create_search_markup(results, query, page=1):
         
     return InlineKeyboardMarkup(buttons)
 
-@app.on_message(filters.text & ~filters.command(["start", "help", "about"]))
+# Auto-Filter Movie Search
+@app.on_message(filters.text & ~filters.command(["start", "help", "about", "stats"]))
 async def auto_filter(client, message: Message):
     if message.chat.type.name == "PRIVATE":
         if not await is_subscribed(client, message.from_user.id):
@@ -121,7 +133,13 @@ async def auto_filter(client, message: Message):
         return
     
     results = await db_instance.search_media(query)
+    
+    # User feedback when no results match
     if not results:
+        await message.reply_text(
+            f"❌ <b>'{query}'</b> nahi mila!\n\n💡 Make sure karein ki spelling sahi hai aur file storage channel me upload ki gayi hai.",
+            quote=True
+        )
         return
     
     reply_markup = create_search_markup(results, query, page=1)
@@ -141,7 +159,7 @@ async def pagination_handler(client, query: CallbackQuery):
     
     results = await db_instance.search_media(search_query)
     if not results:
-        await query.answer("❌ No files found!", show_alert=True)
+        await query.answer("❌ Koi file nahi mili!", show_alert=True)
         return
         
     reply_markup = create_search_markup(results, search_query, page=page_num)
@@ -162,7 +180,7 @@ async def send_file_handler(client, query: CallbackQuery):
         chat_id=query.from_user.id,
         file_id=file_id
     )
-    await query.answer("✅ Movie file aapke inbox me bhej di gayi hai!", show_alert=True)
+    await query.answer("✅ File bhej di gayi hai!", show_alert=True)
 
 @app.on_callback_query(filters.regex(r"^(ignore|pages_count)$"))
 async def ignore_handler(client, query: CallbackQuery):
