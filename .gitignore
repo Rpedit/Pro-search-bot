@@ -1,5 +1,25 @@
+# Python bytecode & cache files
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
 venv/
+env/
+ENV/
+.env
+
+# Pyrogram Session Files (Sabse zaroori - Session leak hone se bachane ke liye)
+*.session
+*.session-journal
+
+# Logs & Temporary files
 *.log
+.DS_Store
+Thumbs.db
+
+# Build / Distribution
+build/
+dist/
+*.egg-info/
