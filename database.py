@@ -1,85 +1,60 @@
-import re
 import motor.motor_asyncio
-from config import DATABASE_URI, DATABASE_URI_2, USE_SECOND_DB
+from config import DATABASE_URI_1, DATABASE_URI_2, DATABASE_NAME
 
-# Primary Database Client & Collection
-client1 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI) if DATABASE_URI else None
-db1 = client1["AutoFilterBot"] if client1 else None
-col1 = db1["files"] if db1 is not None else None
+client1 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI_1)
+db1 = client1[DATABASE_NAME]
+user_col = db1["users"]
+media_col_1 = db1["telegram_files"]
 
-# Secondary Database Client & Collection (Safe Initialization)
-client2 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI_2) if DATABASE_URI_2 else None
-db2 = client2["AutoFilterBot"] if client2 else None
-col2 = db2["files"] if db2 is not None else None
+client2 = motor.motor_asyncio.AsyncIOMotorClient(DATABASE_URI_2) if DATABASE_URI_2 else client1
+db2 = client2[DATABASE_NAME] if DATABASE_URI_2 else db1
+media_col_2 = db2["telegram_files"]
 
-def get_active_collection():
-    if USE_SECOND_DB and col2 is not None:
-        return col2
-    return col1
+# MongoDB Atlas Free Tier Limit (~512MB), switching safely at 480MB
+MAX_DB_SIZE = 480 * 1024 * 1024 
 
-async def save_file(media):
-    try:
-        col = get_active_collection()
-        if col is None:
+class Database:
+    async def add_user(self, user_id):
+        if not await user_col.find_one({"_id": user_id}):
+            await user_col.insert_one({"_id": user_id})
+
+    async def total_users_count(self):
+        return await user_col.count_documents({})
+
+    async def get_active_collection(self):
+        try:
+            stats = await db1.command("dbStats")
+            current_size = stats.get("dataSize", 0) + stats.get("indexSize", 0)
+            if current_size >= MAX_DB_SIZE and DATABASE_URI_2:
+                return media_col_2
+        except Exception:
+            pass
+        return media_col_1
+
+    async def save_file(self, file_data):
+        file_id = file_data.get("file_id")
+        exists_1 = await media_col_1.find_one({"file_id": file_id})
+        exists_2 = await media_col_2.find_one({"file_id": file_id}) if DATABASE_URI_2 else None
+
+        if exists_1 or exists_2:
             return False
 
-        file_id = media.file_id
-        file_name = getattr(media, "file_name", "Unknown File")
-        file_size = getattr(media, "file_size", 0)
-        mime_type = getattr(media, "mime_type", "None")
+        col = await self.get_active_collection()
+        await col.insert_one(file_data)
+        return True
 
-        exists = await col.find_one({"file_id": file_id})
-        if not exists:
-            doc = {
-                "file_id": file_id,
-                "file_name": file_name,
-                "file_size": file_size,
-                "mime_type": mime_type
-            }
-            await col.insert_one(doc)
-            return True
-        return False
-    except Exception as e:
-        print(f"[DB ERROR] save_file failed: {e}", flush=True)
-        return False
+    async def search_media(self, query):
+        regex = {"file_name": {"$regex": query, "$options": "i"}}
+        
+        cursor1 = media_col_1.find(regex)
+        results1 = await cursor1.to_list(length=30)
 
-async def search_db(query: str, limit: int = 300):
-    try:
-        safe_query = re.escape(query)
-        regex = {"file_name": {"$regex": safe_query, "$options": "i"}}
-        results = []
+        results2 = []
+        if DATABASE_URI_2:
+            cursor2 = media_col_2.find(regex)
+            results2 = await cursor2.to_list(length=30)
 
-        if col1 is not None:
-            res1 = await col1.find(regex).to_list(length=limit)
-            results.extend(res1)
+        combined = {item["file_id"]: item for item in results1 + results2}
+        return list(combined.values())[:50]
 
-        if col2 is not None:
-            res2 = await col2.find(regex).to_list(length=limit)
-            results.extend(res2)
-
-        seen = set()
-        unique_results = []
-        for item in results:
-            if item["file_id"] not in seen:
-                seen.add(item["file_id"])
-                unique_results.append(item)
-
-        return unique_results
-    except Exception as e:
-        print(f"[DB ERROR] search_db failed: {e}", flush=True)
-        return []
-
-async def get_file(file_id: str):
-    try:
-        if col1 is not None:
-            file_data = await col1.find_one({"file_id": file_id})
-            if file_data:
-                return file_data
-        if col2 is not None:
-            file_data = await col2.find_one({"file_id": file_id})
-            if file_data:
-                return file_data
-        return None
-    except Exception as e:
-        print(f"[DB ERROR] get_file failed: {e}", flush=True)
-        return None
+db_instance = Database()
